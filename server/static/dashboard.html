@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skrining Retinopati Diabetik</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #F3F6F7;
+    --surface: #FFFFFF;
+    --ink: #17252E;
+    --muted: #5D6B73;
+    --line: #D3DCE0;
+    --g0: #3E8E6E; --g1: #8FA83F; --g2: #D9982B; --g3: #D0612F; --g4: #A8323E;
+    --warn-bg: #FFF4E0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 15px; line-height: 1.5; font-variant-numeric: tabular-nums;
+  }
+  header {
+    display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px;
+    padding: 20px 28px; border-bottom: 1px solid var(--line); background: var(--surface);
+  }
+  header h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+  #status { color: var(--muted); font-size: 14px; }
+  #status.offline { color: var(--g4); }
+  main {
+    max-width: 1200px; margin: 0 auto; padding: 24px 28px 40px;
+    display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 24px;
+  }
+  section { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 22px; }
+  h2 { margin: 0 0 14px; font-size: 16px; font-weight: 600; }
+
+  /* Hasil terbaru: elemen utama */
+  #scan { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 28px; align-items: start; }
+  .eye {
+    width: 260px; height: 260px; border-radius: 50%; overflow: hidden; background: #000;
+    border: 6px solid var(--line); transition: border-color .3s;
+  }
+  .eye img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .verdict { font-size: 34px; font-weight: 700; line-height: 1.1; margin: 0 0 4px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 0 0 18px; }
+  .ladder { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .ladder li {
+    display: grid; grid-template-columns: 22px 110px 1fr 52px; align-items: center; gap: 10px;
+    font-size: 14px; color: var(--muted); padding: 4px 6px; border-radius: 4px;
+  }
+  .ladder li.on { color: var(--ink); font-weight: 600; background: var(--paper); }
+  .ladder .n { text-align: center; }
+  .bar { height: 8px; background: var(--paper); border-radius: 4px; overflow: hidden; }
+  .bar span { display: block; height: 100%; width: 0; transition: width .4s; }
+  .ladder .pct { text-align: right; }
+  .tag { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; margin-right: 6px; }
+  .tag.ref { background: #F6DEDF; color: var(--g4); }
+  .tag.ok { background: #DDEFE7; color: var(--g0); }
+  .tag.warn { background: var(--warn-bg); color: #8A5A0B; }
+  .meta { margin-top: 16px; color: var(--muted); font-size: 13px; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+
+  /* Ringkasan */
+  .totals { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+  .totals div { padding: 12px; background: var(--paper); border-radius: 4px; }
+  .totals b { display: block; font-size: 26px; line-height: 1.1; }
+  .totals small { color: var(--muted); }
+  .dist { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--paper); }
+  .dist span { height: 100%; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; font-size: 13px; color: var(--muted); }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+
+  /* Upload */
+  #upload { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+  #upload p { margin: 0 0 10px; color: var(--muted); font-size: 14px; }
+  label.drop {
+    display: block; border: 1.5px dashed var(--line); border-radius: 6px; padding: 18px;
+    text-align: center; cursor: pointer; color: var(--muted); font-size: 14px;
+  }
+  label.drop:hover, label.drop:focus-within { border-color: var(--ink); color: var(--ink); }
+  input[type=file] { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  #uploadMsg { margin-top: 8px; font-size: 13px; min-height: 1.4em; }
+
+  /* Login (hanya muncul jika server memakai API_KEY) */
+  #login { max-width: 420px; margin: 48px auto; }
+  #login form { display: flex; gap: 8px; }
+  #login input { flex: 1; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; }
+  #login button { font: inherit; font-weight: 600; padding: 8px 14px; border: 0; border-radius: 4px; background: var(--ink); color: var(--surface); cursor: pointer; }
+  #loginMsg { color: var(--g4); font-size: 14px; min-height: 1.4em; margin: 8px 0 0; }
+  [hidden] { display: none !important; }
+
+  /* Riwayat */
+  #history { grid-column: 1 / -1; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-weight: 600; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr.row { cursor: pointer; }
+  tr.row:hover, tr.row:focus { background: var(--paper); outline: none; }
+  tr.row.sel { background: var(--paper); box-shadow: inset 3px 0 0 var(--ink); }
+  td img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; display: block; background: #000; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+
+  footer { max-width: 1200px; margin: 0 auto; padding: 0 28px 32px; color: var(--muted); font-size: 13px; }
+
+  @media (max-width: 860px) {
+    main { grid-template-columns: minmax(0, 1fr); padding: 16px; }
+    #scan { grid-template-columns: 1fr; justify-items: center; }
+    .scan-info { width: 100%; }
+    .eye { width: 200px; height: 200px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Skrining retinopati diabetik</h1>
+  <span id="status">Menghubungkan ke server…</span>
+</header>
+
+<section id="login" hidden>
+  <h2>Masukkan API key</h2>
+  <p class="sub">Server ini dilindungi API key (env <code>API_KEY</code>).</p>
+  <form id="loginForm">
+    <input id="key" type="password" aria-label="API key" autocomplete="current-password" placeholder="API key" required>
+    <button type="submit">Masuk</button>
+  </form>
+  <p id="loginMsg" role="alert"></p>
+</section>
+
+<main id="app">
+  <section aria-live="polite">
+    <h2 id="scanTitle">Hasil terbaru</h2>
+    <div id="scanBox"><p class="empty">Belum ada pemindaian. Ambil foto dari perangkat ESP32 atau unggah gambar fundus di panel samping.</p></div>
+  </section>
+
+  <section>
+    <h2>Ringkasan</h2>
+    <div class="totals">
+      <div><b id="total">0</b><small>Total pemindaian</small></div>
+      <div><b id="ref">0</b><small>Perlu dirujuk</small></div>
+    </div>
+    <div class="dist" id="dist"></div>
+    <div class="legend" id="legend"></div>
+    <p class="meta" id="modelInfo"></p>
+
+    <div id="upload">
+      <h2>Unggah gambar</h2>
+      <p>Untuk menguji model dengan foto fundus dari dataset atau kamera lain.</p>
+      <label class="drop">
+        <input type="file" id="file" accept="image/jpeg,image/png">
+        Pilih file JPG atau PNG
+      </label>
+      <div id="uploadMsg"></div>
+    </div>
+  </section>
+
+  <section id="history">
+    <h2>Riwayat</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>Waktu</th><th>Perangkat</th><th>Hasil</th><th>Keyakinan</th><th>Kualitas</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="6" class="empty">Belum ada data.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Hasil ini adalah alat bantu skrining, bukan diagnosis. Grade 2 ke atas sebaiknya diperiksa dokter mata.
+</footer>
+
+<script>
+const COLORS = ["var(--g0)", "var(--g1)", "var(--g2)", "var(--g3)", "var(--g4)"];
+let LABELS = ["Tidak ada DR", "Ringan", "Sedang", "Berat", "Proliferatif"];
+let results = [];
+let selectedId = null;   // null = selalu tampilkan yang terbaru
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtTime = (ts) => new Date(ts * 1000).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "medium" });
+const pct = (p) => Math.round(p * 100) + "%";
+
+function renderScan(r) {
+  if (!r) return;
+  $("scanTitle").textContent = selectedId ? "Hasil terpilih" : "Hasil terbaru";
+  const q = r.quality;
+  const tags = [
+    r.referable ? '<span class="tag ref">Perlu dirujuk ke dokter mata</span>' : '<span class="tag ok">Tidak perlu rujukan</span>',
+    q.ok ? "" : `<span class="tag warn">Kualitas gambar: ${esc(q.issues.join(", "))}</span>`,
+  ].join("");
+  const ladder = r.probs.map((p, g) => `
+    <li class="${g === r.grade ? "on" : ""}">
+      <span class="n">${g}</span><span>${esc(LABELS[g])}</span>
+      <span class="bar"><span style="width:${p * 100}%;background:${COLORS[g]}"></span></span>
+      <span class="pct">${pct(p)}</span>
+    </li>`).join("");
+  $("scanBox").innerHTML = `
+    <div id="scan">
+      <div class="eye" style="border-color:${COLORS[r.grade]}"><img src="${esc(r.image_url)}" alt="Foto fundus dari ${esc(r.device)}"></div>
+      <div class="scan-info">
+        <p class="verdict">${esc(r.label)}</p>
+        <p class="sub">Grade ${r.grade} dari 4, keyakinan ${pct(r.confidence)}${r.p_referable != null ? `. Peluang perlu rujukan ${pct(r.p_referable)}` : ""}</p>
+        <div>${tags}</div>
+        <ul class="ladder" style="margin-top:16px">${ladder}</ul>
+        <p class="meta">${esc(r.device)}, ${fmtTime(r.ts)}. Waktu inferensi ${r.latency_ms} ms.
+          ${selectedId ? '<a href="#" id="backLatest">Kembali ke hasil terbaru</a>' : ""}</p>
+      </div>
+    </div>`;
+  const back = $("backLatest");
+  if (back) back.onclick = (e) => { e.preventDefault(); selectedId = null; render(); };
+}
+
+function renderRows() {
+  if (!results.length) return;
+  const current = selectedId || results[0].id;
+  $("rows").innerHTML = results.map(r => `
+    <tr class="row ${r.id === current ? "sel" : ""}" data-id="${r.id}" tabindex="0">
+      <td><img src="${esc(r.image_url)}" alt="" loading="lazy"></td>
+      <td>${fmtTime(r.ts)}</td>
+      <td>${esc(r.device)}</td>
+      <td><span class="dot" style="background:${COLORS[r.grade]}"></span>${esc(r.label)}</td>
+      <td>${pct(r.confidence)}</td>
+      <td>${r.quality.ok ? "Baik" : esc(r.quality.issues.join(", "))}</td>
+    </tr>`).join("");
+  document.querySelectorAll("tr.row").forEach(tr => {
+    const pick = () => { selectedId = tr.dataset.id === results[0].id ? null : tr.dataset.id; render(); window.scrollTo({ top: 0, behavior: "smooth" }); };
+    tr.onclick = pick;
+    tr.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } };
+  });
+}
+
+function render() {
+  const r = selectedId ? results.find(x => x.id === selectedId) : results[0];
+  renderScan(r);
+  renderRows();
+}
+
+function renderStats(s) {
+  LABELS = s.labels;
+  $("total").textContent = s.total;
+  $("ref").textContent = s.referable;
+  const sum = s.per_grade.reduce((a, b) => a + b, 0) || 1;
+  $("dist").innerHTML = s.per_grade.map((n, g) => n ? `<span style="width:${n / sum * 100}%;background:${COLORS[g]}" title="${esc(LABELS[g])}: ${n}"></span>` : "").join("");
+  $("legend").innerHTML = s.per_grade.map((n, g) => `<span><i style="background:${COLORS[g]}"></i>${esc(LABELS[g])} ${n}</span>`).join("");
+  $("modelInfo").textContent = `Model ${s.model}` + (s.val_kappa != null ? `, kappa validasi ${s.val_kappa.toFixed(3)}` : "");
+}
+
+function showLogin(on) {
+  $("login").hidden = !on;
+  $("app").hidden = on;
+  if (on) $("key").focus();
+}
+
+async function refresh() {
+  try {
+    const [res, st] = await Promise.all([fetch("/api/results?limit=30"), fetch("/api/stats")]);
+    if (res.status === 401 || st.status === 401) {
+      showLogin(true);
+      $("status").textContent = "Perlu API key";
+      $("status").className = "offline";
+      return;
+    }
+    showLogin(false);
+    if (!res.ok || !st.ok) throw new Error();
+    const fresh = await res.json();
+    const changed = JSON.stringify(fresh.map(r => r.id)) !== JSON.stringify(results.map(r => r.id));
+    results = fresh;
+    renderStats(await st.json());
+    if (changed) render();
+    $("status").textContent = "Terhubung, diperbarui " + new Date().toLocaleTimeString("id-ID");
+    $("status").className = "";
+  } catch {
+    $("status").textContent = "Server tidak merespons. Pastikan uvicorn masih berjalan.";
+    $("status").className = "offline";
+  }
+}
+
+$("file").onchange = async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  $("uploadMsg").textContent = "Menganalisis " + f.name + "…";
+  const fd = new FormData();
+  fd.append("file", f);
+  try {
+    const res = await fetch("/api/upload", { method: "POST", body: fd });
+    if (res.status === 401) { showLogin(true); return; }
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Gagal menganalisis gambar.");
+    $("uploadMsg").textContent = `${f.name}: ${data.label} (${pct(data.confidence)})`;
+    selectedId = null;
+    await refresh();
+    render();
+  } catch (err) {
+    $("uploadMsg").textContent = err.message;
+  }
+  e.target.value = "";
+};
+
+$("loginForm").onsubmit = async (e) => {
+  e.preventDefault();
+  $("loginMsg").textContent = "";
+  try {
+    const res = await fetch("/api/login", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: $("key").value }),
+    });
+    if (!res.ok) throw new Error("API key salah.");
+    $("key").value = "";
+    results = [];
+    await refresh();
+  } catch (err) {
+    $("loginMsg").textContent = err.message || "Server tidak merespons.";
+  }
+};
+
+refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>

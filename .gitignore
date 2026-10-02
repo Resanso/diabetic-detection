@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Artefak model & data runtime (besar / data pasien)
+server/model/*.onnx
+server/model/metadata.json
+server/data/
+output/
+*.pth
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
