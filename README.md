@@ -37,12 +37,21 @@ Proses preprocessing awal sekitar 5–10 menit, lalu tiap epoch beberapa menit d
 Di akhir log akan muncul metrik seperti:
 
 ```
-Epoch 15: loss=... kappa=0.90 acc=0.82 sens_ref=0.9 spec_ref=0.95
+Epoch 15: loss=... kappa=0.90 auc_ref=0.97 acc=0.82 sens_ref@0.5=0.90 spec_ref@0.5=0.95 skor[both]=0.935
+Ambang rujukan dari val (target sensitivitas 0.95): 0.31
+VAL : kappa=0.90 acc=0.82 auc_ref=0.97 sens_ref=0.95 spec_ref=0.88
+TEST: kappa=0.89 acc=0.81 auc_ref=0.96 sens_ref=0.94 spec_ref=0.87
 ONNX diekspor ke output/dr_model.onnx | selisih maks vs PyTorch: 1e-05
 ```
 
+Data dibagi 70/15/15 menjadi train, val, dan test. Val dipakai untuk memilih checkpoint (default: rata-rata kappa dan
+`auc_ref`, ubah dengan `--select kappa|auc_ref|both`) dan menyetel ambang rujukan agar sensitivitas ≥ `--target_sens`
+(default 0.95). Baris **TEST** adalah angka yang jujur untuk dilaporkan, karena data uji tidak dipakai untuk keputusan apa pun.
+Ambang ini disimpan di `metadata.json` dan otomatis dipakai server (bisa ditimpa dengan env `REF_PROB`).
+
 Cara membaca metrik:
 
+- **auc_ref** adalah kemampuan model memisahkan pasien perlu rujukan dan tidak, terlepas dari ambang yang dipilih.
 - **kappa** (quadratic weighted kappa) adalah metrik resmi APTOS. Nilai sekitar 0.85–0.92 wajar untuk EfficientNet-B0.
 - **sens_ref** (sensitivitas referable) paling penting untuk skrining: berapa persen pasien yang perlu dirujuk berhasil terdeteksi. Usahakan setinggi mungkin.
 - **spec_ref** (spesifisitas) adalah berapa persen pasien sehat yang benar dinyatakan tidak perlu rujukan.

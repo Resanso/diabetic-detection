@@ -231,6 +231,7 @@ def stats():
         "labels": LABELS,
         "model": META.get("model"),
         "val_kappa": (META.get("val_metrics") or {}).get("kappa"),
+        "test_kappa": (META.get("test_metrics") or {}).get("kappa"),
         "ref_prob_threshold": REF_PROB,
         "auth": bool(API_KEY),
     }

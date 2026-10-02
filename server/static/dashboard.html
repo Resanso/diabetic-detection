@@ -245,7 +245,9 @@ function renderStats(s) {
   const sum = s.per_grade.reduce((a, b) => a + b, 0) || 1;
   $("dist").innerHTML = s.per_grade.map((n, g) => n ? `<span style="width:${n / sum * 100}%;background:${COLORS[g]}" title="${esc(LABELS[g])}: ${n}"></span>` : "").join("");
   $("legend").innerHTML = s.per_grade.map((n, g) => `<span><i style="background:${COLORS[g]}"></i>${esc(LABELS[g])} ${n}</span>`).join("");
-  $("modelInfo").textContent = `Model ${s.model}` + (s.val_kappa != null ? `, kappa validasi ${s.val_kappa.toFixed(3)}` : "");
+  const kappa = s.test_kappa != null ? `, kappa data uji ${s.test_kappa.toFixed(3)}`
+              : s.val_kappa != null ? `, kappa validasi ${s.val_kappa.toFixed(3)}` : "";
+  $("modelInfo").textContent = `Model ${s.model}${kappa}. Ambang rujukan ${pct(s.ref_prob_threshold)}.`;
 }
 
 function showLogin(on) {
