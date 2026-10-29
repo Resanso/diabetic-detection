@@ -6,6 +6,7 @@ venv/
 
 # Artefak model & data runtime (besar / data pasien)
 server/model/*.onnx
+server/model/*.onnx.data
 server/model/metadata.json
 server/data/
 output/
@@ -15,3 +16,10 @@ output/
 .DS_Store
 .vscode/
 .idea/
+
+# Kredensial WiFi ESP32
+esp32/**/secrets.h
+esp32/**/build/
+
+# Arsip snapshot lokal
+*.zip

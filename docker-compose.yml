@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  diabetic-detection:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: diabetic-detection-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - API_KEY=               # Isi dengan password acak jika ingin mengaktifkan autentikasi
+      - REF_PROB=0.40          # Ambang probabilitas rujukan (default 0.40)
+    volumes:
+      # Simpan data pasien, riwayat SQLite, dan gambar agar tidak hilang saat container direstart
+      - ./server/data:/app/data
+      # Hubungkan folder model jika ingin mengganti bobot ONNX tanpa rebuild container
+      - ./server/model:/app/model

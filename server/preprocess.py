@@ -8,7 +8,7 @@ Salin file ini ke folder server/ setiap kali Anda mengubahnya.
 import cv2
 import numpy as np
 
-IMG_SIZE = 320
+IMG_SIZE = 224
 MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
@@ -37,6 +37,51 @@ def ben_graham(img: np.ndarray, size: int = IMG_SIZE) -> np.ndarray:
     cv2.circle(mask, (size // 2, size // 2), int(size * 0.48), 255, -1)
     return cv2.bitwise_and(img, img, mask=mask)
 
+
+def standard_preprocess(img: np.ndarray, size: int = IMG_SIZE) -> np.ndarray:
+    """
+    Standar preprocessing untuk arsitektur ResNet / EfficientNet yang dilatih tanpa Ben Graham:
+    crop border hitam -> resize -> masker lingkaran retina.
+    """
+    img = crop_black_border(img)
+    img = cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
+    mask = np.zeros((size, size), np.uint8)
+    cv2.circle(mask, (size // 2, size // 2), int(size * 0.48), 255, -1)
+    return cv2.bitwise_and(img, img, mask=mask)
+
+
+def generate_saliency_heatmap(img_rgb: np.ndarray, size: int = IMG_SIZE) -> str:
+    """
+    Peta atensi / saliensi visual lesi retina (mikroaneurisma, pendarahan, eksudat).
+    Menggunakan CLAHE saluran hijau (green channel) dan perbedaan filter lokal.
+    Mengembalikan Data URL base64 JPEG.
+    """
+    import base64
+    img_clean = crop_black_border(img_rgb)
+    img_resized = cv2.resize(img_clean, (size, size), interpolation=cv2.INTER_AREA)
+    green = img_resized[:, :, 1]
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    cl = clahe.apply(green)
+    blur = cv2.GaussianBlur(cl, (15, 15), 0)
+    diff = cv2.subtract(blur, cl)
+    diff_norm = cv2.normalize(diff, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+    heatmap = cv2.applyColorMap(diff_norm, cv2.COLORMAP_JET)
+    heatmap_rgb = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
+    overlay = cv2.addWeighted(img_resized, 0.65, heatmap_rgb, 0.35, 0)
+    mask = np.zeros((size, size), dtype=np.uint8)
+    cv2.circle(mask, (size // 2, size // 2), int(size * 0.48), 255, -1)
+    overlay = cv2.bitwise_and(overlay, overlay, mask=mask)
+    bgr = cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR)
+    _, buf = cv2.imencode('.jpg', bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return 'data:image/jpeg;base64,' + base64.b64encode(buf).decode('utf-8')
+
+
+def img_to_base64(img_rgb: np.ndarray) -> str:
+    """Konversi citra RGB uint8 ke string Data URL base64 JPEG."""
+    import base64
+    bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+    _, buf = cv2.imencode('.jpg', bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return 'data:image/jpeg;base64,' + base64.b64encode(buf).decode('utf-8')
 
 def to_model_input(img: np.ndarray) -> np.ndarray:
     """RGB uint8 HWC -> float32 NCHW ternormalisasi (untuk ONNX Runtime)."""

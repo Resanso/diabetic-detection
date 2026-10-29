@@ -3,323 +3,2328 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Skrining Retinopati Diabetik</title>
+<title>Skrining & Evaluasi Akurasi Retinopati Diabetik (DR)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --paper: #F3F6F7;
-    --surface: #FFFFFF;
-    --ink: #17252E;
-    --muted: #5D6B73;
-    --line: #D3DCE0;
-    --g0: #3E8E6E; --g1: #8FA83F; --g2: #D9982B; --g3: #D0612F; --g4: #A8323E;
-    --warn-bg: #FFF4E0;
+    --bg-page: #0B0F17;
+    --bg-surface: #121824;
+    --bg-card: #182234;
+    --bg-card-subtle: #1E2B40;
+    --border: #24334A;
+    --border-subtle: #1C2738;
+    --border-focus: #3B82F6;
+    --text-primary: #F1F5F9;
+    --text-secondary: #94A3B8;
+    --text-muted: #64748B;
+    --accent: #2563EB;
+    --accent-hover: #1D4ED8;
+    --accent-light: rgba(37, 99, 235, 0.15);
+    
+    /* DR Severity Grade Colors */
+    --g0: #10B981; /* Grade 0 Normal (Emerald) */
+    --g0-bg: rgba(16, 185, 129, 0.15);
+    --g1: #F59E0B; /* Grade 1 Mild (Amber) */
+    --g1-bg: rgba(245, 158, 11, 0.15);
+    --g2: #F97316; /* Grade 2 Moderate (Orange) */
+    --g2-bg: rgba(249, 115, 22, 0.15);
+    --g3: #EF4444; /* Grade 3 Severe (Red) */
+    --g3-bg: rgba(239, 68, 68, 0.15);
+    --g4: #991B1B; /* Grade 4 Proliferative (Crimson) */
+    --g4-bg: rgba(153, 27, 27, 0.25);
+
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 18px;
+    --radius-pill: 9999px;
+    
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 12px 30px rgba(0, 0, 0, 0.5);
   }
+
   * { box-sizing: border-box; }
   body {
-    margin: 0; background: var(--paper); color: var(--ink);
-    font-family: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-    font-size: 15px; line-height: 1.5; font-variant-numeric: tabular-nums;
+    margin: 0;
+    background: var(--bg-page);
+    color: var(--text-primary);
+    font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    font-variant-numeric: tabular-nums;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
   }
+
+  /* Header */
   header {
-    display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px;
-    padding: 20px 28px; border-bottom: 1px solid var(--line); background: var(--surface);
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    padding: 14px 28px;
   }
-  header h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
-  #status { color: var(--muted); font-size: 14px; }
-  #status.offline { color: var(--g4); }
+  .header-inner {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .brand-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: var(--radius-md);
+    background: linear-gradient(135deg, #1E40AF, #3B82F6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    box-shadow: 0 0 12px rgba(59, 130, 246, 0.35);
+  }
+  .brand h1 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .brand p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .model-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    padding: 5px 14px;
+    font-size: 12px;
+  }
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--g0);
+    box-shadow: 0 0 8px var(--g0);
+  }
+  .status-dot.offline { background: var(--g3); box-shadow: 0 0 8px var(--g3); }
+
+  /* Navigation Tabs */
+  .nav-tabs {
+    display: flex;
+    gap: 4px;
+    background: var(--bg-card);
+    padding: 4px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+  }
+  .tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 7px 16px;
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tab-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-card-subtle);
+  }
+  .tab-btn.active {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4);
+  }
+  .tab-btn:active { transform: scale(0.98); }
+
+  /* Main Container */
   main {
-    max-width: 1200px; margin: 0 auto; padding: 24px 28px 40px;
-    display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 24px 28px 60px;
+    width: 100%;
+    flex: 1;
   }
-  section { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 22px; }
-  h2 { margin: 0 0 14px; font-size: 16px; font-weight: 600; }
 
-  /* Hasil terbaru: elemen utama */
-  #scan { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 28px; align-items: start; }
-  .eye {
-    width: 260px; height: 260px; border-radius: 50%; overflow: hidden; background: #000;
-    border: 6px solid var(--line); transition: border-color .3s;
+  /* Utility classes */
+  .hidden { display: none !important; }
+  .grid-2 { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 24px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+  .grid-5 { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+
+  .card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    box-shadow: var(--shadow-sm);
   }
-  .eye img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .verdict { font-size: 34px; font-weight: 700; line-height: 1.1; margin: 0 0 4px; letter-spacing: -0.02em; }
-  .sub { color: var(--muted); margin: 0 0 18px; }
-  .ladder { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-  .ladder li {
-    display: grid; grid-template-columns: 22px 110px 1fr 52px; align-items: center; gap: 10px;
-    font-size: 14px; color: var(--muted); padding: 4px 6px; border-radius: 4px;
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-subtle);
   }
-  .ladder li.on { color: var(--ink); font-weight: 600; background: var(--paper); }
-  .ladder .n { text-align: center; }
-  .bar { height: 8px; background: var(--paper); border-radius: 4px; overflow: hidden; }
-  .bar span { display: block; height: 100%; width: 0; transition: width .4s; }
-  .ladder .pct { text-align: right; }
-  .tag { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; margin-right: 6px; }
-  .tag.ref { background: #F6DEDF; color: var(--g4); }
-  .tag.ok { background: #DDEFE7; color: var(--g0); }
-  .tag.warn { background: var(--warn-bg); color: #8A5A0B; }
-  .meta { margin-top: 16px; color: var(--muted); font-size: 13px; }
-  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
-
-  /* Ringkasan */
-  .totals { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
-  .totals div { padding: 12px; background: var(--paper); border-radius: 4px; }
-  .totals b { display: block; font-size: 26px; line-height: 1.1; }
-  .totals small { color: var(--muted); }
-  .dist { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--paper); }
-  .dist span { height: 100%; }
-  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; font-size: 13px; color: var(--muted); }
-  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
-
-  /* Upload */
-  #upload { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
-  #upload p { margin: 0 0 10px; color: var(--muted); font-size: 14px; }
-  label.drop {
-    display: block; border: 1.5px dashed var(--line); border-radius: 6px; padding: 18px;
-    text-align: center; cursor: pointer; color: var(--muted); font-size: 14px;
+  .card-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
-  label.drop:hover, label.drop:focus-within { border-color: var(--ink); color: var(--ink); }
-  input[type=file] { position: absolute; opacity: 0; width: 1px; height: 1px; }
-  #uploadMsg { margin-top: 8px; font-size: 13px; min-height: 1.4em; }
-
-  /* Login (hanya muncul jika server memakai API_KEY) */
-  #login { max-width: 420px; margin: 48px auto; }
-  #login form { display: flex; gap: 8px; }
-  #login input { flex: 1; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; }
-  #login button { font: inherit; font-weight: 600; padding: 8px 14px; border: 0; border-radius: 4px; background: var(--ink); color: var(--surface); cursor: pointer; }
-  #loginMsg { color: var(--g4); font-size: 14px; min-height: 1.4em; margin: 8px 0 0; }
-  [hidden] { display: none !important; }
-
-  /* Riwayat */
-  #history { grid-column: 1 / -1; }
-  .table-wrap { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th { text-align: left; font-weight: 600; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--line); }
-  td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-  tr.row { cursor: pointer; }
-  tr.row:hover, tr.row:focus { background: var(--paper); outline: none; }
-  tr.row.sel { background: var(--paper); box-shadow: inset 3px 0 0 var(--ink); }
-  td img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; display: block; background: #000; }
-  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
-
-  footer { max-width: 1200px; margin: 0 auto; padding: 0 28px 32px; color: var(--muted); font-size: 13px; }
-
-  @media (max-width: 860px) {
-    main { grid-template-columns: minmax(0, 1fr); padding: 16px; }
-    #scan { grid-template-columns: 1fr; justify-items: center; }
-    .scan-info { width: 100%; }
-    .eye { width: 200px; height: 200px; }
+  .card-subtitle {
+    margin: 3px 0 0;
+    font-size: 12px;
+    color: var(--text-secondary);
   }
-  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  /* Quick Sample Picker Bar */
+  .sample-bar {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 16px 20px;
+    margin-bottom: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .sample-bar-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .sample-bar-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .sample-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .sample-chip {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: left;
+    color: var(--text-primary);
+    font-family: inherit;
+  }
+  .sample-chip:hover {
+    border-color: var(--accent);
+    background: var(--bg-card-subtle);
+    transform: translateY(-2px);
+  }
+  .sample-chip:active { transform: scale(0.98); }
+  .sample-thumb {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid var(--border);
+    background: #000;
+    flex-shrink: 0;
+  }
+  .sample-info { min-width: 0; }
+  .sample-info b { display: block; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sample-info span { font-size: 11px; color: var(--text-secondary); display: block; }
+
+  /* Dropzone & Form */
+  .drop-box {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius-lg);
+    padding: 32px 20px;
+    text-align: center;
+    background: var(--bg-card);
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    position: relative;
+  }
+  .drop-box:hover, .drop-box.dragover {
+    border-color: var(--accent);
+    background: var(--bg-card-subtle);
+  }
+  .drop-icon {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 12px;
+    border-radius: 50%;
+    background: var(--accent-light);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .drop-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+  .drop-desc { font-size: 12px; color: var(--text-secondary); margin: 0; }
+  input[type="file"] { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+
+  .form-row {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+    align-items: center;
+  }
+  .form-group { flex: 1; }
+  .form-label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--text-secondary); }
+  select, input[type="text"] {
+    width: 100%;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    padding: 9px 12px;
+    font-family: inherit;
+    font-size: 13px;
+  }
+  select:focus, input[type="text"]:focus {
+    outline: none;
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 2px var(--accent-light);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 18px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover { background: var(--accent-hover); box-shadow: 0 2px 10px rgba(37, 99, 235, 0.4); }
+  .btn-secondary {
+    background: var(--bg-card);
+    border-color: var(--border);
+    color: var(--text-primary);
+  }
+  .btn-secondary:hover { background: var(--bg-card-subtle); border-color: var(--text-muted); }
+  .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: var(--radius-sm); }
+
+  /* Diagnostic Result Section */
+  .verdict-banner {
+    padding: 16px 20px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+    border: 1px solid;
+  }
+  .verdict-banner.ref-yes {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #FCA5A5;
+  }
+  .verdict-banner.ref-no {
+    background: rgba(16, 185, 129, 0.12);
+    border-color: rgba(16, 185, 129, 0.35);
+    color: #6EE7B7;
+  }
+  .verdict-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .verdict-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    font-weight: 700;
+  }
+  .ref-yes .verdict-icon { background: var(--g3); color: #fff; }
+  .ref-no .verdict-icon { background: var(--g0); color: #fff; }
+  .verdict-title { font-size: 16px; font-weight: 800; line-height: 1.2; margin: 0; }
+  .verdict-desc { font-size: 12px; margin: 3px 0 0; opacity: 0.9; }
+
+  /* Tri-View Images */
+  .tri-view {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .view-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 10px;
+    text-align: center;
+  }
+  .view-img-wrap {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: #000;
+    margin-bottom: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .view-img-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .view-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 0; }
+
+  /* Probability Ladder */
+  .prob-ladder {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .prob-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    display: grid;
+    grid-template-columns: 24px 140px 1fr 60px;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .prob-item.selected {
+    background: var(--bg-card-subtle);
+    border-color: var(--border);
+    color: var(--text-primary);
+    font-weight: 700;
+  }
+  .prob-grade-num {
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 700;
+    text-align: center;
+  }
+  .prob-bar-track {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-pill);
+    overflow: hidden;
+  }
+  .prob-bar-fill {
+    height: 100%;
+    border-radius: var(--radius-pill);
+    transition: width 0.4s ease;
+  }
+  .prob-pct {
+    text-align: right;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+  }
+
+  /* Accuracy KPI Cards */
+  .kpi-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    overflow: hidden;
+  }
+  .kpi-card::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--card-accent, var(--accent));
+  }
+  .kpi-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+  .kpi-value { font-size: 28px; font-weight: 800; line-height: 1.1; margin-bottom: 4px; font-family: "JetBrains Mono", monospace; }
+  .kpi-sub { font-size: 11px; color: var(--text-muted); }
+
+  /* Confusion Matrix 5x5 */
+  .matrix-wrap {
+    overflow-x: auto;
+    padding: 4px 0;
+  }
+  .matrix-table {
+    border-collapse: separate;
+    border-spacing: 4px;
+    margin: 0 auto;
+    font-size: 12px;
+  }
+  .matrix-table th {
+    color: var(--text-secondary);
+    font-weight: 600;
+    padding: 6px 8px;
+    text-align: center;
+  }
+  .matrix-table td {
+    width: 60px;
+    height: 52px;
+    text-align: center;
+    border-radius: var(--radius-sm);
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    transition: transform 0.1s, box-shadow 0.1s;
+    vertical-align: middle;
+  }
+  .matrix-table td:hover {
+    transform: scale(1.08);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+    z-index: 10;
+  }
+  .matrix-table td small {
+    display: block;
+    font-size: 9px;
+    font-weight: normal;
+    opacity: 0.8;
+  }
+
+  /* Confusion Matrix 2x2 */
+  .cm2-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .cm2-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px;
+    text-align: center;
+  }
+  .cm2-box.tp { border-left: 4px solid var(--g3); }
+  .cm2-box.fn { border-left: 4px solid #DC2626; background: rgba(220, 38, 38, 0.08); }
+  .cm2-box.tn { border-left: 4px solid var(--g0); }
+  .cm2-box.fp { border-left: 4px solid #F59E0B; }
+  .cm2-count { font-size: 24px; font-weight: 800; font-family: "JetBrains Mono", monospace; }
+  .cm2-title { font-size: 11px; font-weight: 700; color: var(--text-secondary); margin-top: 4px; }
+  .cm2-desc { font-size: 10px; color: var(--text-muted); }
+
+  /* Range Slider */
+  .slider-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .slider-box input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .slider-val {
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 700;
+    font-size: 14px;
+    background: var(--bg-surface);
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    min-width: 60px;
+    text-align: center;
+  }
+
+  /* Data Table */
+  .table-responsive {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+  }
+  table.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    text-align: left;
+  }
+  table.data-table th {
+    background: var(--bg-card);
+    padding: 10px 14px;
+    color: var(--text-secondary);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  table.data-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    vertical-align: middle;
+  }
+  table.data-table tr:hover {
+    background: var(--bg-card-subtle);
+  }
+  .tbl-thumb {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: #000;
+    border: 1px solid var(--border);
+    display: block;
+  }
+
+  /* Badges & Tags */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: var(--radius-pill);
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .badge-g0 { background: var(--g0-bg); color: var(--g0); border: 1px solid rgba(16, 185, 129, 0.3); }
+  .badge-g1 { background: var(--g1-bg); color: var(--g1); border: 1px solid rgba(245, 158, 11, 0.3); }
+  .badge-g2 { background: var(--g2-bg); color: var(--g2); border: 1px solid rgba(249, 115, 22, 0.3); }
+  .badge-g3 { background: var(--g3-bg); color: var(--g3); border: 1px solid rgba(239, 68, 68, 0.3); }
+  .badge-g4 { background: var(--g4-bg); color: #FCA5A5; border: 1px solid rgba(153, 27, 27, 0.5); }
+  
+  .badge-match { background: rgba(16, 185, 129, 0.15); color: #34D399; }
+  .badge-mismatch { background: rgba(239, 68, 68, 0.15); color: #F87171; }
+  .badge-ref-yes { background: rgba(239, 68, 68, 0.2); color: #F87171; }
+  .badge-ref-no { background: rgba(16, 185, 129, 0.2); color: #34D399; }
+
+  /* Filter pill buttons */
+  .filter-group {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .filter-btn {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    color: var(--text-secondary);
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .filter-btn.active, .filter-btn:hover {
+    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 20px;
+  }
+  .modal-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    width: 100%;
+    max-width: 680px;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: 24px;
+    box-shadow: var(--shadow-lg);
+  }
+
+  /* Progress Spinner */
+  .spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Footer */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 20px 28px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--bg-surface);
+  }
+
+  @media (max-width: 1024px) {
+    .grid-2 { grid-template-columns: 1fr; }
+    .grid-3 { grid-template-columns: 1fr; }
+    .grid-4 { grid-template-columns: repeat(2, 1fr); }
+    .sample-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 640px) {
+    header { padding: 12px 16px; }
+    main { padding: 16px 16px 40px; }
+    .grid-4 { grid-template-columns: 1fr; }
+    .sample-grid { grid-template-columns: 1fr; }
+    .tri-view { grid-template-columns: 1fr; }
+    .prob-item { grid-template-columns: 20px 110px 1fr 45px; font-size: 12px; }
+  }
+
+  /* Kamera ESP32 */
+  .cam-layout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+  .cam-device { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .cam-device-name { font-family: "JetBrains Mono", monospace; font-size: 13px; font-weight: 600; }
+  .cam-meta { font-size: 12px; color: var(--text-secondary); }
+  .cam-frame {
+    position: relative; aspect-ratio: 4 / 3; width: 100%; max-width: 100%;
+    background: var(--bg-page); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+    overflow: hidden; display: flex; align-items: center; justify-content: center;
+  }
+  .cam-frame img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .cam-placeholder { color: var(--text-muted); font-size: 13px; text-align: center; padding: 24px; }
+  .cam-overlay {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(11, 15, 23, 0.72); color: var(--text-primary); font-weight: 600; gap: 10px;
+  }
+  .cam-spinner {
+    width: 18px; height: 18px; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    animation: cam-spin 0.8s linear infinite;
+  }
+  @keyframes cam-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .cam-spinner { animation: none; } }
+  .cam-actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
+  .cam-result { display: grid; gap: 12px; }
+  .cam-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }
+  .cam-row span:first-child { color: var(--text-secondary); }
+  .cam-warn {
+    background: var(--g1-bg); color: var(--g1); border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: var(--radius-sm); padding: 10px 12px; font-size: 12.5px;
+  }
+  .cam-msg { font-size: 12.5px; color: var(--text-secondary); min-height: 1.4em; }
+  .cam-msg.error { color: var(--g3); }
+  .cam-strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+  .cam-strip button {
+    flex: 0 0 auto; width: 96px; padding: 0; background: none; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); overflow: hidden; cursor: pointer; color: var(--text-secondary);
+    font: inherit; font-size: 11px; text-align: left;
+  }
+  .cam-strip button[aria-current="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-light); }
+  .cam-strip img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; }
+  .cam-strip small { display: block; padding: 4px 6px; }
+  @media (max-width: 1024px) { .cam-layout { grid-template-columns: 1fr; } }
+
+  /* Pengaturan kamera ESP32 */
+  .cam-settings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 24px; }
+  .cam-field { display: grid; gap: 6px; min-width: 0; }
+  .cam-field label, .cam-field .cam-field-label { font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; gap: 8px; }
+  .cam-field output { font-family: "JetBrains Mono", monospace; color: var(--text-primary); font-size: 12px; }
+  .cam-field select, .cam-field input[type="range"] { width: 100%; }
+  .cam-field select {
+    background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 7px 10px; font: inherit; font-size: 13px;
+  }
+  .cam-field input[type="range"] { accent-color: var(--accent); }
+  .cam-hint { font-size: 11.5px; color: var(--text-muted); }
+  .cam-checks { display: flex; flex-wrap: wrap; gap: 10px 18px; font-size: 13px; }
+  .cam-checks label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .cam-seg { display: flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+  .cam-seg label { flex: 1; text-align: center; padding: 7px 6px; font-size: 12.5px; cursor: pointer; color: var(--text-secondary); border-right: 1px solid var(--border); }
+  .cam-seg label:last-child { border-right: 0; }
+  .cam-seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .cam-seg label:has(input:checked) { background: var(--accent-light); color: var(--text-primary); font-weight: 600; }
+  .cam-seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .cam-settings-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
+  .cam-sync { font-size: 12.5px; color: var(--text-secondary); }
+  .cam-sync.ok { color: var(--g0); }
+  .cam-sync.pending { color: var(--g1); }
+  .cam-span-3 { grid-column: 1 / -1; }
+  @media (max-width: 1024px) { .cam-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 560px) { .cam-settings { grid-template-columns: minmax(0, 1fr); } }
 </style>
 </head>
 <body>
+
 <header>
-  <h1>Skrining retinopati diabetik</h1>
-  <span id="status">Menghubungkan ke server…</span>
+  <div class="header-inner">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="9"/>
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>
+        </svg>
+      </div>
+      <div>
+        <h1>Skrining Retinopati Diabetik</h1>
+        <p>Pengujian Langsung Akurasi Model & Deteksi Dini Kebutaan</p>
+      </div>
+    </div>
+
+    <div class="model-badge">
+      <span class="status-dot" id="serverDot"></span>
+      <span id="modelInfoLabel">Memuat model...</span>
+    </div>
+
+    <div class="nav-tabs" role="tablist">
+      <button class="tab-btn active" data-tab="tab-single" role="tab">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/><path d="m10 15 5-3-5-3v6z"/>
+        </svg>
+        Uji Citra Tunggal
+      </button>
+      <button class="tab-btn" data-tab="tab-camera" role="tab">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>
+        </svg>
+        Kamera ESP32
+      </button>
+      <button class="tab-btn" data-tab="tab-benchmark" role="tab">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 20V10M12 20V4M6 20v-6"/>
+        </svg>
+        Uji Akurasi Benchmark
+      </button>
+      <button class="tab-btn" data-tab="tab-batch" role="tab">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+        </svg>
+        Uji Batch ZIP
+      </button>
+      <button class="tab-btn" data-tab="tab-history" role="tab">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/>
+        </svg>
+        Riwayat & Log
+      </button>
+    </div>
+  </div>
 </header>
 
-<section id="login" hidden>
-  <h2>Masukkan API key</h2>
-  <p class="sub">Server ini dilindungi API key (env <code>API_KEY</code>).</p>
-  <form id="loginForm">
-    <input id="key" type="password" aria-label="API key" autocomplete="current-password" placeholder="API key" required>
-    <button type="submit">Masuk</button>
-  </form>
-  <p id="loginMsg" role="alert"></p>
-</section>
-
-<main id="app">
-  <section aria-live="polite">
-    <h2 id="scanTitle">Hasil terbaru</h2>
-    <div id="scanBox"><p class="empty">Belum ada pemindaian. Ambil foto dari perangkat ESP32 atau unggah gambar fundus di panel samping.</p></div>
-  </section>
-
-  <section>
-    <h2>Ringkasan</h2>
-    <div class="totals">
-      <div><b id="total">0</b><small>Total pemindaian</small></div>
-      <div><b id="ref">0</b><small>Perlu dirujuk</small></div>
+<main>
+  <!-- TAB 1: UJI CITRA TUNGGAL -->
+  <div id="tab-single" class="tab-content">
+    <!-- Quick Sample Bar -->
+    <div class="sample-bar">
+      <div class="sample-bar-top">
+        <span class="sample-bar-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 8 6 4-6 4Z"/>
+          </svg>
+          Uji Cepat Sampel Terverifikasi (Pilih salah satu kelas untuk menguji):
+        </span>
+        <span style="font-size: 12px; color: var(--text-secondary);">Klik sampel untuk langsung inferensi</span>
+      </div>
+      <div class="sample-grid" id="samplePickerGrid">
+        <!-- Rendered via JS -->
+      </div>
     </div>
-    <div class="dist" id="dist"></div>
-    <div class="legend" id="legend"></div>
-    <p class="meta" id="modelInfo"></p>
 
-    <div id="upload">
-      <h2>Unggah gambar</h2>
-      <p>Untuk menguji model dengan foto fundus dari dataset atau kamera lain.</p>
-      <label class="drop">
-        <input type="file" id="file" accept="image/jpeg,image/png">
-        Pilih file JPG atau PNG
-      </label>
-      <div id="uploadMsg"></div>
-    </div>
-  </section>
+    <div class="grid-2">
+      <!-- Input Column -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Unggah Citra Fundus Retina</h2>
+            <p class="card-subtitle">Pilih berkas foto retina atau gunakan kamera untuk uji akurasi</p>
+          </div>
+        </div>
 
-  <section id="history">
-    <h2>Riwayat</h2>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th></th><th>Waktu</th><th>Perangkat</th><th>Hasil</th><th>Keyakinan</th><th>Kualitas</th></tr></thead>
-        <tbody id="rows"><tr><td colspan="6" class="empty">Belum ada data.</td></tr></tbody>
-      </table>
+        <div class="drop-box" id="dropArea">
+          <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp">
+          <div class="drop-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12v9m-4-4 4-4 4 4"/>
+            </svg>
+          </div>
+          <div class="drop-title" id="dropTitle">Tarik & Letakkan Foto Fundus ke Sini</div>
+          <p class="drop-desc">Mendukung format JPG, PNG, WEBP (Maksimal 10 MB)</p>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="groundTruthSelect">Label Aktual / Ground Truth (Opsional untuk uji akurasi):</label>
+            <select id="groundTruthSelect">
+              <option value="">-- Tidak Ditentukan / Pasien Baru --</option>
+              <option value="0">Grade 0: Normal / Tidak Ada DR</option>
+              <option value="1">Grade 1: DR Ringan (Mild)</option>
+              <option value="2">Grade 2: DR Sedang (Moderate)</option>
+              <option value="3">Grade 3: DR Berat (Severe)</option>
+              <option value="4">Grade 4: DR Proliferatif (PDR)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="margin-top: 16px; display: flex; gap: 10px;">
+          <button class="btn btn-primary" id="btnTestSingle" style="flex: 1;" disabled>
+            <span class="btn-text">Jalankan Pengujian Akurasi</span>
+          </button>
+          <button class="btn btn-secondary" id="btnResetSingle">Reset</button>
+        </div>
+
+        <div id="singleError" style="margin-top: 12px; color: var(--g3); font-size: 13px;" class="hidden"></div>
+      </div>
+
+      <!-- Result Column -->
+      <div class="card" id="singleResultContainer">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Hasil Diagnosis & Evaluasi Citra</h2>
+            <p class="card-subtitle" id="resultMetaSubtitle">Menunggu pengujian citra...</p>
+          </div>
+          <div id="matchPillContainer"></div>
+        </div>
+
+        <div id="singleEmptyState" style="text-align: center; padding: 60px 20px; color: var(--text-muted);">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 12px; opacity: 0.5;">
+            <circle cx="12" cy="12" r="9"/><path d="M12 15h.01M12 9v4"/>
+          </svg>
+          <p style="margin: 0; font-size: 14px;">Belum ada citra yang diuji.</p>
+          <p style="margin: 4px 0 0; font-size: 12px;">Pilih salah satu tombol sampel di atas atau unggah foto retina Anda.</p>
+        </div>
+
+        <div id="singleResultContent" class="hidden">
+          <!-- Verdict Banner -->
+          <div class="verdict-banner" id="verdictBanner">
+            <div class="verdict-heading">
+              <div class="verdict-icon" id="verdictIcon">!</div>
+              <div>
+                <h3 class="verdict-title" id="verdictTitle">Hasil Analisis</h3>
+                <p class="verdict-desc" id="verdictDesc">Keterangan rujukan</p>
+              </div>
+            </div>
+            <div style="text-align: right;">
+              <span style="font-size: 11px; opacity: 0.8; display: block;">Tingkat Keparahan</span>
+              <span style="font-size: 18px; font-weight: 800; font-family: 'JetBrains Mono', monospace;" id="verdictGrade">Grade -</span>
+            </div>
+          </div>
+
+          <!-- Tri-View Visual Inspection -->
+          <div class="tri-view">
+            <div class="view-item">
+              <div class="view-img-wrap">
+                <img id="imgOriginal" alt="Original">
+              </div>
+              <p class="view-title">1. Citra Asli</p>
+            </div>
+            <div class="view-item">
+              <div class="view-img-wrap">
+                <img id="imgPreprocessed" alt="Preprocessed">
+              </div>
+              <p class="view-title">2. Pra-pemrosesan</p>
+            </div>
+            <div class="view-item">
+              <div class="view-img-wrap">
+                <img id="imgHeatmap" alt="Heatmap">
+              </div>
+              <p class="view-title">3. Peta Atensi Lesi</p>
+            </div>
+          </div>
+
+          <!-- Probability Distribution Ladder -->
+          <div style="margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
+              <span style="font-size: 12px; font-weight: 700; color: var(--text-secondary);">Distribusi Probabilitas Model:</span>
+              <span style="font-size: 11px; color: var(--text-muted);" id="latencyBadge">Latency: 0 ms</span>
+            </div>
+            <ul class="prob-ladder" id="probLadder">
+              <!-- Rendered via JS -->
+            </ul>
+          </div>
+
+          <!-- Quality Metrics -->
+          <div style="background: var(--bg-card); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+            <span>Kecerahan: <b id="valBrightness" style="color: var(--text-primary);">-</b></span>
+            <span>Ketajaman: <b id="valSharpness" style="color: var(--text-primary);">-</b></span>
+            <span>Peluang Rujukan: <b id="valPRef" style="color: var(--text-primary);">-</b></span>
+            <span>Status Mutu: <b id="valQualityOk" style="color: var(--text-primary);">-</b></span>
+          </div>
+        </div>
+      </div>
     </div>
-  </section>
+  </div>
+
+  <!-- TAB 2: UJI AKURASI BENCHMARK -->
+  <div id="tab-benchmark" class="tab-content hidden">
+    <!-- Action Banner -->
+    <div class="sample-bar" style="margin-bottom: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+        <div>
+          <h2 style="margin: 0; font-size: 16px; font-weight: 700;">Pengujian Akurasi Benchmark Model</h2>
+          <p style="margin: 3px 0 0; font-size: 13px; color: var(--text-secondary);">
+            Evaluasi model terhadap 50 sampel fundus terverifikasi (10 sampel seimbang per grade 0..4 dari dataset APTOS).
+          </p>
+        </div>
+        <button class="btn btn-primary" id="btnRunBenchmark">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+          <span id="btnRunBenchmarkText">Jalankan Evaluasi Akurasi (50 Sampel)</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Threshold Tuning Slider -->
+    <div class="slider-box">
+      <span style="font-size: 13px; font-weight: 700; color: var(--text-primary); white-space: nowrap;">
+        Penyetelan Ambang Rujukan (P<sub>ref</sub>):
+      </span>
+      <input type="range" id="threshRange" min="0.10" max="0.90" step="0.05" value="0.40">
+      <span class="slider-val" id="threshVal">0.40</span>
+      <span style="font-size: 12px; color: var(--text-secondary);">
+        (Geser untuk melihat dampak langsung terhadap sensitivitas dan spesifisitas)
+      </span>
+    </div>
+
+    <!-- KPI Metric Cards Grid -->
+    <div class="grid-4" style="margin-bottom: 20px;">
+      <div class="kpi-card" style="--card-accent: #3B82F6;">
+        <span class="kpi-label">Akurasi Multikelas (5 Grade)</span>
+        <span class="kpi-value" id="kpiAccuracy">-</span>
+        <span class="kpi-sub" id="kpiAccuracySub">Persentase tebakan grade tepat</span>
+      </div>
+      <div class="kpi-card" style="--card-accent: #10B981;">
+        <span class="kpi-label">Quadratic Weighted Kappa (QWK)</span>
+        <span class="kpi-value" id="kpiKappa">-</span>
+        <span class="kpi-sub">Metrik resmi standar klinis APTOS</span>
+      </div>
+      <div class="kpi-card" style="--card-accent: #EF4444;">
+        <span class="kpi-label">Sensitivitas Rujukan (Recall Grade ≥2)</span>
+        <span class="kpi-value" id="kpiSensitivity">-</span>
+        <span class="kpi-sub">Pasien berisiko yang terdeteksi tepat</span>
+      </div>
+      <div class="kpi-card" style="--card-accent: #F59E0B;">
+        <span class="kpi-label">Spesifisitas (Filter Grade 0-1)</span>
+        <span class="kpi-value" id="kpiSpecificity">-</span>
+        <span class="kpi-sub">Pasien sehat terhindar rujukan keliru</span>
+      </div>
+    </div>
+
+    <!-- Confusion Matrix & Class Breakdown -->
+    <div class="grid-2" style="margin-bottom: 24px;">
+      <!-- 5x5 Matrix -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Matriks Konfusi Multikelas 5×5</h3>
+            <p class="card-subtitle">Baris = Aktual (Ground Truth) vs Kolom = Prediksi Model</p>
+          </div>
+        </div>
+        <div class="matrix-wrap" id="matrix5x5Container">
+          <p style="color: var(--text-muted); text-align: center; padding: 40px 0;">Jalankan evaluasi untuk melihat matriks konfusi.</p>
+        </div>
+      </div>
+
+      <!-- 2x2 Matrix & Screening Breakdown -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Matriks Keputusan Skrining Medis (2×2)</h3>
+            <p class="card-subtitle">Keputusan rujukan dokter mata: Grade ≥ 2</p>
+          </div>
+        </div>
+
+        <div class="cm2-grid" style="margin-bottom: 16px;">
+          <div class="cm2-box tp">
+            <div class="cm2-count" id="cm2TP" style="color: var(--g3);">-</div>
+            <div class="cm2-title">True Positive (TP)</div>
+            <div class="cm2-desc">Perlu Rujuk &amp; Berhasil Terdeteksi</div>
+          </div>
+          <div class="cm2-box fn">
+            <div class="cm2-count" id="cm2FN" style="color: #EF4444;">-</div>
+            <div class="cm2-title">False Negative (FN)</div>
+            <div class="cm2-desc">BAHAYA: Pasien Sakit Terlewat</div>
+          </div>
+          <div class="cm2-box tn">
+            <div class="cm2-count" id="cm2TN" style="color: var(--g0);">-</div>
+            <div class="cm2-title">True Negative (TN)</div>
+            <div class="cm2-desc">Normal &amp; Dinyatakan Aman</div>
+          </div>
+          <div class="cm2-box fp">
+            <div class="cm2-count" id="cm2FP" style="color: #F59E0B;">-</div>
+            <div class="cm2-title">False Positive (FP)</div>
+            <div class="cm2-desc">Normal tetapi Dirujuk (Rujukan Semu)</div>
+          </div>
+        </div>
+
+        <!-- Per Class Table -->
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Kelas</th>
+                <th>Presisi</th>
+                <th>Recall</th>
+                <th>F1-Score</th>
+                <th>Sampel</th>
+              </tr>
+            </thead>
+            <tbody id="perClassTableBody">
+              <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Belum ada data evaluasi.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sample Inspection Table -->
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <h3 class="card-title">Daftar Audit Sampel Benchmark</h3>
+          <p class="card-subtitle">Periksa detail prediksi per citra</p>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <div class="filter-group" id="benchFilterGroup">
+            <button class="filter-btn active" data-filter="all">Semua (<span id="cntAll">0</span>)</button>
+            <button class="filter-btn" data-filter="correct">Benar (<span id="cntCorrect">0</span>)</button>
+            <button class="filter-btn" data-filter="wrong">Salah (<span id="cntWrong">0</span>)</button>
+            <button class="filter-btn" data-filter="fn">False Negative (<span id="cntFN">0</span>)</button>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="btnExportCSV">Unduh CSV</button>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Foto</th>
+              <th>ID Sampel</th>
+              <th>Aktual</th>
+              <th>Prediksi</th>
+              <th>Confidence</th>
+              <th>P<sub>ref</sub></th>
+              <th>Status Skrining</th>
+              <th>Latensi</th>
+            </tr>
+          </thead>
+          <tbody id="benchmarkTableBody">
+            <tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px 0;">Klik tombol "Jalankan Evaluasi Akurasi" untuk mengisi data.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 3: UJI BATCH ZIP -->
+  <div id="tab-batch" class="tab-content hidden">
+    <div class="card" style="max-width: 800px; margin: 0 auto;">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Uji Akurasi Dataset Kustom (.ZIP)</h2>
+          <p class="card-subtitle">Unggah arsip ZIP citra fundus retina Anda sendiri untuk evaluasi otomatis</p>
+        </div>
+      </div>
+
+      <div style="background: var(--bg-card); border-radius: var(--radius-md); padding: 14px; margin-bottom: 20px; font-size: 13px;">
+        <b style="color: var(--text-primary); display: block; margin-bottom: 6px;">Format Struktur ZIP yang Didukung:</b>
+        <p style="margin: 0 0 6px; color: var(--text-secondary);">1. <b>Folder berdasarkan nomor grade:</b> <code>0/</code>, <code>1/</code>, <code>2/</code>, <code>3/</code>, <code>4/</code></p>
+        <p style="margin: 0 0 6px; color: var(--text-secondary);">2. <b>Folder berdasarkan istilah:</b> <code>normal/</code>, <code>mild/</code>, <code>moderate/</code>, <code>severe/</code>, <code>proliferative/</code></p>
+        <p style="margin: 0; color: var(--text-secondary);">3. <b>Penamaan berkas:</b> misal <code>grade0_01.jpg</code>, <code>g2_pasien12.png</code></p>
+      </div>
+
+      <div class="drop-box" id="dropAreaZip">
+        <input type="file" id="zipFileInput" accept=".zip">
+        <div class="drop-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+            <polyline points="3.29 7 12 12 20.71 7"/><line x1="12" x2="12" y1="22" y2="12"/>
+          </svg>
+        </div>
+        <div class="drop-title" id="dropZipTitle">Tarik & Letakkan File .ZIP di Sini</div>
+        <p class="drop-desc">Maksimal 50 MB</p>
+      </div>
+
+      <div style="margin-top: 16px;">
+        <button class="btn btn-primary" id="btnUploadZip" style="width: 100%;" disabled>
+          Mulai Evaluasi Akurasi Batch
+        </button>
+      </div>
+
+      <div id="batchProgress" class="hidden" style="margin-top: 16px; text-align: center; color: var(--text-secondary);">
+        <div class="spinner" style="margin: 0 auto 10px;"></div>
+        <span id="batchProgressText">Mengekstrak dan menguji citra dengan ONNX Runtime...</span>
+      </div>
+
+      <div id="batchResultContainer" class="hidden" style="margin-top: 24px;">
+        <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 12px;">Ringkasan Hasil Dataset Kustom:</h3>
+        <div class="grid-4" id="batchKpiGrid" style="margin-bottom: 16px;">
+          <!-- Injected via JS -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: KAMERA ESP32 -->
+  <div id="tab-camera" class="tab-content hidden">
+    <div class="cam-layout">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Kamera ESP32</h2>
+            <p class="card-subtitle">Pengganti sementara kamera fundus. Foto dikirim lewat WiFi dan langsung dianalisis model.</p>
+          </div>
+          <div class="cam-device" id="camDevice">
+            <span class="status-dot offline" id="camDot"></span>
+            <span class="cam-device-name" id="camName">Mencari perangkat...</span>
+          </div>
+        </div>
+        <div class="cam-frame" id="camFrame">
+          <div class="cam-placeholder" id="camPlaceholder">Belum ada foto dari ESP32.<br>Klik "Ambil Foto" atau tekan tombol di perangkat.</div>
+          <img id="camImage" alt="Foto terbaru dari ESP32-CAM" hidden>
+          <div class="cam-overlay" id="camOverlay" hidden><span class="cam-spinner"></span><span>Menunggu foto dari ESP32...</span></div>
+        </div>
+        <div class="cam-actions">
+          <button class="btn btn-primary" id="btnCapture" disabled>Ambil Foto</button>
+          <span class="cam-msg" id="camMsg"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Hasil Skrining</h2>
+            <p class="card-subtitle" id="camResultTime">Belum ada hasil</p>
+          </div>
+        </div>
+        <div class="cam-result" id="camResult">
+          <p class="cam-placeholder">Hasil analisis foto terbaru akan tampil di sini.</p>
+        </div>
+      </div>
+    </div>
+
+
+    <div class="card" style="margin-top: 24px;">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Pengaturan Kamera &amp; Flash</h2>
+          <p class="card-subtitle">Disimpan di server dan diterapkan ESP32 dalam ±2 detik, tanpa upload ulang firmware.</p>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btnCamDefaults" type="button">Kembalikan Default</button>
+      </div>
+      <form id="camSettingsForm" novalidate>
+        <div class="cam-settings">
+          <div class="cam-field">
+            <label for="setResolution">Resolusi</label>
+            <select id="setResolution" name="resolution">
+              <option value="VGA">VGA · 640×480</option>
+              <option value="SVGA">SVGA · 800×600</option>
+              <option value="XGA">XGA · 1024×768</option>
+              <option value="HD">HD · 1280×720</option>
+              <option value="SXGA">SXGA · 1280×1024</option>
+              <option value="UXGA">UXGA · 1600×1200</option>
+            </select>
+            <span class="cam-hint">Model memakai 224 px; resolusi tinggi membantu fokus &amp; arsip tetapi upload lebih lama.</span>
+          </div>
+          <div class="cam-field">
+            <label for="setQuality">Kompresi JPEG <output id="outQuality" for="setQuality">10</output></label>
+            <input type="range" id="setQuality" name="jpeg_quality" min="8" max="40" step="1">
+            <span class="cam-hint">Angka kecil = lebih tajam, file lebih besar.</span>
+          </div>
+          <div class="cam-field">
+            <label for="setAe">Eksposur <output id="outAe" for="setAe">0</output></label>
+            <input type="range" id="setAe" name="ae_level" min="-2" max="2" step="1">
+            <span class="cam-hint">Naikkan jika foto terlalu gelap.</span>
+          </div>
+          <div class="cam-field">
+            <label for="setBrightness">Kecerahan <output id="outBrightness" for="setBrightness">0</output></label>
+            <input type="range" id="setBrightness" name="brightness" min="-2" max="2" step="1">
+          </div>
+          <div class="cam-field">
+            <label for="setContrast">Kontras <output id="outContrast" for="setContrast">0</output></label>
+            <input type="range" id="setContrast" name="contrast" min="-2" max="2" step="1">
+          </div>
+          <div class="cam-field">
+            <label for="setSaturation">Saturasi <output id="outSaturation" for="setSaturation">0</output></label>
+            <input type="range" id="setSaturation" name="saturation" min="-2" max="2" step="1">
+          </div>
+
+          <div class="cam-field">
+            <span class="cam-field-label" id="lblFlash">Flash (LED GPIO4)</span>
+            <div class="cam-seg" role="radiogroup" aria-labelledby="lblFlash">
+              <label><input type="radio" name="flash_mode" id="flashOff" value="off">Mati</label>
+              <label><input type="radio" name="flash_mode" id="flashCapture" value="capture">Saat memotret</label>
+              <label><input type="radio" name="flash_mode" id="flashOn" value="on">Selalu nyala</label>
+            </div>
+          </div>
+          <div class="cam-field">
+            <label for="setFlashIntensity">Intensitas flash <output id="outFlash" for="setFlashIntensity">50%</output></label>
+            <input type="range" id="setFlashIntensity" name="flash_intensity" min="0" max="255" step="5">
+          </div>
+          <div class="cam-field">
+            <span class="cam-field-label">Orientasi &amp; warna</span>
+            <div class="cam-checks">
+              <label><input type="checkbox" id="setAwb" name="awb"> White balance otomatis</label>
+              <label><input type="checkbox" id="setHmirror" name="hmirror"> Cermin</label>
+              <label><input type="checkbox" id="setVflip" name="vflip"> Balik vertikal</label>
+            </div>
+          </div>
+
+          <div class="cam-warn cam-span-3">Jangan arahkan flash langsung ke mata tanpa lensa dan pengaturan yang tepat. LED ESP32-CAM sangat terang; gunakan intensitas serendah mungkin dan mode "Selalu nyala" hanya untuk membidik sebentar.</div>
+        </div>
+        <div class="cam-settings-foot">
+          <button class="btn btn-primary" type="submit" id="btnSaveSettings">Simpan &amp; Terapkan</button>
+          <span class="cam-sync" id="camSync"></span>
+        </div>
+      </form>
+    </div>
+
+    <div class="card" style="margin-top: 24px;">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Foto Terakhir dari ESP32</h2>
+          <p class="card-subtitle">Klik foto untuk melihat hasilnya</p>
+        </div>
+      </div>
+      <div class="cam-strip" id="camStrip"><span class="cam-meta">Belum ada foto.</span></div>
+    </div>
+  </div>
+
+  <!-- TAB 4: RIWAYAT & LOG -->
+  <div id="tab-history" class="tab-content hidden">
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Riwayat Skrining & Log Pengujian</h2>
+          <p class="card-subtitle">Daftar semua inferensi yang disimpan di database lokal SQLite</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary btn-sm" id="btnRefreshHistory">Muat Ulang</button>
+          <button class="btn btn-secondary btn-sm" id="btnClearHistory" style="color: var(--g3);">Bersihkan Log</button>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Waktu</th>
+              <th>Foto</th>
+              <th>ID</th>
+              <th>Sumber</th>
+              <th>Grade Prediksi</th>
+              <th>Confidence</th>
+              <th>P<sub>ref</sub></th>
+              <th>Rujukan</th>
+              <th>Aktual</th>
+              <th>Akurasi</th>
+              <th>Latensi</th>
+            </tr>
+          </thead>
+          <tbody id="historyTableBody">
+            <tr><td colspan="11" style="text-align: center; color: var(--text-muted); padding: 30px 0;">Memuat riwayat...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </main>
 
 <footer>
-  Hasil ini adalah alat bantu skrining, bukan diagnosis. Grade 2 ke atas sebaiknya diperiksa dokter mata.
+  Prototype Skrining Retinopati Diabetik &bull; EfficientNet / ResNet-50 ONNX Runtime &bull; Standar Skrining APTOS 2019 Blindness Detection
 </footer>
 
 <script>
-const COLORS = ["var(--g0)", "var(--g1)", "var(--g2)", "var(--g3)", "var(--g4)"];
-let LABELS = ["Tidak ada DR", "Ringan", "Sedang", "Berat", "Proliferatif"];
-let results = [];
-let selectedId = null;   // null = selalu tampilkan yang terbaru
+  // State
+  let benchmarkData = null;
+  let activeBenchmarkFilter = 'all';
+  let activeThreshold = 0.40;
+  let cachedBenchmarkSamples = [];
 
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const fmtTime = (ts) => new Date(ts * 1000).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "medium" });
-const pct = (p) => Math.round(p * 100) + "%";
+  const LABELS = ["Tidak ada DR", "Ringan", "Sedang", "Berat", "Proliferatif"];
+  const GRADE_CLASSES = ["g0", "g1", "g2", "g3", "g4"];
 
-function renderScan(r) {
-  if (!r) return;
-  $("scanTitle").textContent = selectedId ? "Hasil terpilih" : "Hasil terbaru";
-  const q = r.quality;
-  const tags = [
-    r.referable ? '<span class="tag ref">Perlu dirujuk ke dokter mata</span>' : '<span class="tag ok">Tidak perlu rujukan</span>',
-    q.ok ? "" : `<span class="tag warn">Kualitas gambar: ${esc(q.issues.join(", "))}</span>`,
-  ].join("");
-  const ladder = r.probs.map((p, g) => `
-    <li class="${g === r.grade ? "on" : ""}">
-      <span class="n">${g}</span><span>${esc(LABELS[g])}</span>
-      <span class="bar"><span style="width:${p * 100}%;background:${COLORS[g]}"></span></span>
-      <span class="pct">${pct(p)}</span>
-    </li>`).join("");
-  $("scanBox").innerHTML = `
-    <div id="scan">
-      <div class="eye" style="border-color:${COLORS[r.grade]}"><img src="${esc(r.image_url)}" alt="Foto fundus dari ${esc(r.device)}"></div>
-      <div class="scan-info">
-        <p class="verdict">${esc(r.label)}</p>
-        <p class="sub">Grade ${r.grade} dari 4, keyakinan ${pct(r.confidence)}${r.p_referable != null ? `. Peluang perlu rujukan ${pct(r.p_referable)}` : ""}</p>
-        <div>${tags}</div>
-        <ul class="ladder" style="margin-top:16px">${ladder}</ul>
-        <p class="meta">${esc(r.device)}, ${fmtTime(r.ts)}. Waktu inferensi ${r.latency_ms} ms.
-          ${selectedId ? '<a href="#" id="backLatest">Kembali ke hasil terbaru</a>' : ""}</p>
-      </div>
-    </div>`;
-  const back = $("backLatest");
-  if (back) back.onclick = (e) => { e.preventDefault(); selectedId = null; render(); };
-}
+  // Elements
+  const tabButtons = document.querySelectorAll('.tab-btn');
+  const tabContents = document.querySelectorAll('.tab-content');
 
-function renderRows() {
-  if (!results.length) return;
-  const current = selectedId || results[0].id;
-  $("rows").innerHTML = results.map(r => `
-    <tr class="row ${r.id === current ? "sel" : ""}" data-id="${r.id}" tabindex="0">
-      <td><img src="${esc(r.image_url)}" alt="" loading="lazy"></td>
-      <td>${fmtTime(r.ts)}</td>
-      <td>${esc(r.device)}</td>
-      <td><span class="dot" style="background:${COLORS[r.grade]}"></span>${esc(r.label)}</td>
-      <td>${pct(r.confidence)}</td>
-      <td>${r.quality.ok ? "Baik" : esc(r.quality.issues.join(", "))}</td>
-    </tr>`).join("");
-  document.querySelectorAll("tr.row").forEach(tr => {
-    const pick = () => { selectedId = tr.dataset.id === results[0].id ? null : tr.dataset.id; render(); window.scrollTo({ top: 0, behavior: "smooth" }); };
-    tr.onclick = pick;
-    tr.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } };
+  // Tab switching
+  tabButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      tabButtons.forEach(b => b.classList.remove('active'));
+      tabContents.forEach(c => c.classList.add('hidden'));
+      btn.classList.add('active');
+      const target = document.getElementById(btn.dataset.tab);
+      if (target) target.classList.remove('hidden');
+
+      if (btn.dataset.tab === 'tab-history') {
+        loadHistory();
+      }
+      if (btn.dataset.tab === 'tab-camera') startCamera(); else stopCamera();
+    });
   });
-}
 
-function render() {
-  const r = selectedId ? results.find(x => x.id === selectedId) : results[0];
-  renderScan(r);
-  renderRows();
-}
+  // Fetch model info & benchmark samples on start
+  async function init() {
+    try {
+      const res = await fetch('/api/model/info');
+      const info = await res.json();
+      document.getElementById('modelInfoLabel').textContent = `${info.model} (${info.img_size}×${info.img_size}px)`;
+      document.getElementById('serverDot').classList.remove('offline');
+      if (info.referable_prob_threshold) {
+        activeThreshold = info.referable_prob_threshold;
+        document.getElementById('threshRange').value = activeThreshold;
+        document.getElementById('threshVal').textContent = activeThreshold.toFixed(2);
+      }
+    } catch (e) {
+      document.getElementById('modelInfoLabel').textContent = 'Server Offline';
+      document.getElementById('serverDot').classList.add('offline');
+    }
 
-function renderStats(s) {
-  LABELS = s.labels;
-  $("total").textContent = s.total;
-  $("ref").textContent = s.referable;
-  const sum = s.per_grade.reduce((a, b) => a + b, 0) || 1;
-  $("dist").innerHTML = s.per_grade.map((n, g) => n ? `<span style="width:${n / sum * 100}%;background:${COLORS[g]}" title="${esc(LABELS[g])}: ${n}"></span>` : "").join("");
-  $("legend").innerHTML = s.per_grade.map((n, g) => `<span><i style="background:${COLORS[g]}"></i>${esc(LABELS[g])} ${n}</span>`).join("");
-  const kappa = s.test_kappa != null ? `, kappa data uji ${s.test_kappa.toFixed(3)}`
-              : s.val_kappa != null ? `, kappa validasi ${s.val_kappa.toFixed(3)}` : "";
-  $("modelInfo").textContent = `Model ${s.model}${kappa}. Ambang rujukan ${pct(s.ref_prob_threshold)}.`;
-}
+    loadBenchmarkPicker();
+  }
 
-function showLogin(on) {
-  $("login").hidden = !on;
-  $("app").hidden = on;
-  if (on) $("key").focus();
-}
+  // Load samples into quick picker
+  async function loadBenchmarkPicker() {
+    try {
+      const res = await fetch('/api/benchmark/samples');
+      cachedBenchmarkSamples = await res.json();
+      const picker = document.getElementById('samplePickerGrid');
+      picker.innerHTML = '';
 
-async function refresh() {
-  try {
-    const [res, st] = await Promise.all([fetch("/api/results?limit=30"), fetch("/api/stats")]);
-    if (res.status === 401 || st.status === 401) {
-      showLogin(true);
-      $("status").textContent = "Perlu API key";
-      $("status").className = "offline";
+      // Pick 1 representative sample per grade (first sample of each grade)
+      for (let g = 0; g < 5; g++) {
+        const sample = cachedBenchmarkSamples.find(s => s.grade === g);
+        if (!sample) continue;
+
+        const chip = document.createElement('button');
+        chip.className = 'sample-chip';
+        chip.innerHTML = `
+          <img class="sample-thumb" src="${sample.url}" alt="${sample.label}">
+          <div class="sample-info">
+            <b>Grade ${sample.grade}: ${LABELS[sample.grade]}</b>
+            <span>${sample.grade >= 2 ? 'Perlu Rujuk' : 'Tidak Rujuk'}</span>
+          </div>
+        `;
+        chip.addEventListener('click', () => {
+          testSampleDirectly(sample);
+        });
+        picker.appendChild(chip);
+      }
+    } catch (e) {
+      console.error('Error loading sample picker', e);
+    }
+  }
+
+  // Test sample directly from picker
+  async function testSampleDirectly(sample) {
+    // Switch to tab single
+    document.querySelector('[data-tab="tab-single"]').click();
+    document.getElementById('groundTruthSelect').value = sample.grade;
+
+    // Fetch image as blob
+    try {
+      setSingleLoading(true);
+      const imgRes = await fetch(sample.url);
+      const blob = await imgRes.blob();
+      const file = new File([blob], sample.filename, { type: 'image/jpeg' });
+      runSingleTest(file, sample.grade);
+    } catch (e) {
+      alert('Gagal memuat citra sampel: ' + e.message);
+      setSingleLoading(false);
+    }
+  }
+
+  // File Dropzone logic
+  const dropArea = document.getElementById('dropArea');
+  const fileInput = document.getElementById('fileInput');
+  const btnTestSingle = document.getElementById('btnTestSingle');
+  let selectedSingleFile = null;
+
+  dropArea.addEventListener('click', () => fileInput.click());
+  dropArea.addEventListener('dragover', (e) => { e.preventDefault(); dropArea.classList.add('dragover'); });
+  dropArea.addEventListener('dragleave', () => dropArea.classList.remove('dragover'));
+  dropArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropArea.classList.remove('dragover');
+    if (e.dataTransfer.files.length > 0) {
+      handleFileSelected(e.dataTransfer.files[0]);
+    }
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length > 0) {
+      handleFileSelected(fileInput.files[0]);
+    }
+  });
+
+  function handleFileSelected(file) {
+    selectedSingleFile = file;
+    document.getElementById('dropTitle').textContent = `File terpilih: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+    btnTestSingle.disabled = false;
+  }
+
+  document.getElementById('btnResetSingle').addEventListener('click', () => {
+    selectedSingleFile = null;
+    fileInput.value = '';
+    document.getElementById('dropTitle').textContent = 'Tarik & Letakkan Foto Fundus ke Sini';
+    document.getElementById('groundTruthSelect').value = '';
+    btnTestSingle.disabled = true;
+    document.getElementById('singleResultContent').classList.add('hidden');
+    document.getElementById('singleEmptyState').classList.remove('hidden');
+    document.getElementById('singleError').classList.add('hidden');
+  });
+
+  btnTestSingle.addEventListener('click', () => {
+    if (!selectedSingleFile) return;
+    const gt = document.getElementById('groundTruthSelect').value;
+    runSingleTest(selectedSingleFile, gt);
+  });
+
+  function setSingleLoading(isLoading) {
+    if (isLoading) {
+      btnTestSingle.disabled = true;
+      btnTestSingle.innerHTML = '<div class="spinner"></div> Menginferensi dengan ONNX...';
+      document.getElementById('singleError').classList.add('hidden');
+    } else {
+      btnTestSingle.disabled = false;
+      btnTestSingle.innerHTML = 'Jalankan Pengujian Akurasi';
+    }
+  }
+
+  async function runSingleTest(file, groundTruth) {
+    setSingleLoading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    if (groundTruth !== '' && groundTruth !== null && groundTruth !== undefined) {
+      formData.append('true_grade', groundTruth);
+    }
+
+    try {
+      const res = await fetch('/api/evaluate/single', {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Gagal melakukan inferensi.');
+      }
+      const data = await res.json();
+      renderSingleResult(data);
+    } catch (e) {
+      document.getElementById('singleError').textContent = e.message;
+      document.getElementById('singleError').classList.remove('hidden');
+    } finally {
+      setSingleLoading(false);
+    }
+  }
+
+  function renderSingleResult(d) {
+    document.getElementById('singleEmptyState').classList.add('hidden');
+    document.getElementById('singleResultContent').classList.remove('hidden');
+
+    document.getElementById('resultMetaSubtitle').textContent = `ID: ${d.id} | ${new Date(d.ts * 1000).toLocaleTimeString()}`;
+    document.getElementById('latencyBadge').textContent = `Latency: ${d.latency_ms} ms`;
+
+    // Match status pill
+    const matchContainer = document.getElementById('matchPillContainer');
+    matchContainer.innerHTML = '';
+    if (d.true_grade !== null && d.true_grade !== undefined) {
+      const pill = document.createElement('span');
+      if (d.is_correct) {
+        pill.className = 'badge badge-match';
+        pill.textContent = 'Prediksi Tepat (Match)';
+      } else {
+        pill.className = 'badge badge-mismatch';
+        pill.textContent = `Mismatch (Aktual: Grade ${d.true_grade})`;
+      }
+      matchContainer.appendChild(pill);
+    }
+
+    // Verdict Banner
+    const banner = document.getElementById('verdictBanner');
+    const vTitle = document.getElementById('verdictTitle');
+    const vDesc = document.getElementById('verdictDesc');
+    const vIcon = document.getElementById('verdictIcon');
+    const vGrade = document.getElementById('verdictGrade');
+
+    vGrade.textContent = `Grade ${d.grade}`;
+
+    if (d.referable) {
+      banner.className = 'verdict-banner ref-yes';
+      vTitle.textContent = 'PERHATIAN: PERLU RUJUKAN DOKTER MATA';
+      vDesc.textContent = `Peluang rujukan ${(d.p_referable * 100).toFixed(1)}% melewati ambang batas. Memerlukan tindakan klinis.`;
+      vIcon.textContent = '!';
+    } else {
+      banner.className = 'verdict-banner ref-no';
+      vTitle.textContent = 'AMAN: TIDAK PERLU RUJUKAN SEGERA';
+      vDesc.textContent = `Kondisi retina ${d.label.toLowerCase()}. Skrining rutin disarankan secara berkala.`;
+      vIcon.textContent = '✓';
+    }
+
+    // Tri-view images
+    document.getElementById('imgOriginal').src = d.image_url;
+    document.getElementById('imgPreprocessed').src = d.preprocessed_url || d.image_url;
+    document.getElementById('imgHeatmap').src = d.heatmap_url || d.image_url;
+
+    // Quality metrics
+    document.getElementById('valBrightness').textContent = d.quality.brightness;
+    document.getElementById('valSharpness').textContent = d.quality.sharpness;
+    document.getElementById('valPRef').textContent = `${(d.p_referable * 100).toFixed(1)}%`;
+    document.getElementById('valQualityOk').textContent = d.quality.ok ? 'Layak' : `Catatan: ${d.quality.issues.join(', ')}`;
+
+    // Prob ladder
+    const ladder = document.getElementById('probLadder');
+    ladder.innerHTML = '';
+    d.probs.forEach((p, idx) => {
+      const isSel = idx === d.grade;
+      const li = document.createElement('li');
+      li.className = `prob-item ${isSel ? 'selected' : ''}`;
+      const color = `var(--${GRADE_CLASSES[idx]})`;
+      li.innerHTML = `
+        <span class="prob-grade-num" style="color: ${color};">${idx}</span>
+        <span>${LABELS[idx]}</span>
+        <div class="prob-bar-track">
+          <div class="prob-bar-fill" style="width: ${(p * 100).toFixed(1)}%; background: ${color};"></div>
+        </div>
+        <span class="prob-pct">${(p * 100).toFixed(1)}%</span>
+      `;
+      ladder.appendChild(li);
+    });
+  }
+
+  // TAB 2: BENCHMARK EVALUATION LOGIC
+  const btnRunBenchmark = document.getElementById('btnRunBenchmark');
+  btnRunBenchmark.addEventListener('click', () => runBenchmarkEvaluation());
+
+  async function runBenchmarkEvaluation(thresh = activeThreshold) {
+    btnRunBenchmark.disabled = true;
+    document.getElementById('btnRunBenchmarkText').textContent = 'Mengevaluasi 50 citra dengan ONNX...';
+
+    try {
+      const res = await fetch(`/api/benchmark/evaluate?threshold=${thresh}`, { method: 'POST' });
+      if (!res.ok) throw new Error('Gagal menjalankan evaluasi.');
+      benchmarkData = await res.json();
+      renderBenchmarkResults(benchmarkData);
+    } catch (e) {
+      alert('Error saat evaluasi benchmark: ' + e.message);
+    } finally {
+      btnRunBenchmark.disabled = false;
+      document.getElementById('btnRunBenchmarkText').textContent = 'Jalankan Evaluasi Akurasi (50 Sampel)';
+    }
+  }
+
+  // Threshold slider live tune
+  const threshRange = document.getElementById('threshRange');
+  const threshVal = document.getElementById('threshVal');
+  let tuneTimeout = null;
+
+  threshRange.addEventListener('input', (e) => {
+    activeThreshold = parseFloat(e.target.value);
+    threshVal.textContent = activeThreshold.toFixed(2);
+
+    if (benchmarkData && benchmarkData.samples) {
+      clearTimeout(tuneTimeout);
+      tuneTimeout = setTimeout(async () => {
+        try {
+          const res = await fetch('/api/benchmark/tune-threshold', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              threshold: activeThreshold,
+              items: benchmarkData.samples
+            })
+          });
+          const tuned = await res.json();
+          // Update tuned metrics in benchmarkData
+          benchmarkData.referable_sensitivity = tuned.referable_sensitivity;
+          benchmarkData.referable_specificity = tuned.referable_specificity;
+          benchmarkData.referable_accuracy = tuned.referable_accuracy;
+          benchmarkData.confusion_matrix_2x2 = tuned.confusion_matrix_2x2;
+          benchmarkData.ref_threshold = tuned.ref_threshold;
+
+          // Update sample referable_pred
+          benchmarkData.samples.forEach(s => {
+            s.referable_pred = (s.p_referable >= activeThreshold);
+          });
+
+          renderTunedMetricsOnly(benchmarkData);
+        } catch (err) {
+          console.error(err);
+        }
+      }, 100);
+    }
+  });
+
+  function renderBenchmarkResults(data) {
+    // KPI Cards
+    document.getElementById('kpiAccuracy').textContent = `${(data.accuracy * 100).toFixed(1)}%`;
+    document.getElementById('kpiAccuracySub').textContent = `Multikelas (${data.total_samples} sampel total)`;
+
+    document.getElementById('kpiKappa').textContent = data.kappa.toFixed(4);
+    document.getElementById('kpiSensitivity').textContent = `${(data.referable_sensitivity * 100).toFixed(1)}%`;
+    document.getElementById('kpiSpecificity').textContent = `${(data.referable_specificity * 100).toFixed(1)}%`;
+
+    // 2x2 Matrix
+    render2x2Matrix(data.confusion_matrix_2x2);
+
+    // 5x5 Matrix
+    render5x5Matrix(data.confusion_matrix_5x5);
+
+    // Per-class table
+    renderPerClassTable(data.class_metrics);
+
+    // Sample list table
+    renderBenchmarkTable(data.samples);
+  }
+
+  function renderTunedMetricsOnly(data) {
+    document.getElementById('kpiSensitivity').textContent = `${(data.referable_sensitivity * 100).toFixed(1)}%`;
+    document.getElementById('kpiSpecificity').textContent = `${(data.referable_specificity * 100).toFixed(1)}%`;
+    render2x2Matrix(data.confusion_matrix_2x2);
+    renderBenchmarkTable(data.samples);
+  }
+
+  function render2x2Matrix(cm) {
+    document.getElementById('cm2TP').textContent = cm.tp;
+    document.getElementById('cm2FN').textContent = cm.fn;
+    document.getElementById('cm2TN').textContent = cm.tn;
+    document.getElementById('cm2FP').textContent = cm.fp;
+  }
+
+  function render5x5Matrix(cm) {
+    const container = document.getElementById('matrix5x5Container');
+    let html = `
+      <table class="matrix-table">
+        <thead>
+          <tr>
+            <th>Aktual \\ Pred</th>
+            <th>0: Normal</th>
+            <th>1: Ringan</th>
+            <th>2: Sedang</th>
+            <th>3: Berat</th>
+            <th>4: PDR</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+
+    for (let r = 0; r < 5; r++) {
+      html += `<tr><th style="text-align: right;">${r}: ${LABELS[r].split(' ')[0]}</th>`;
+      const rowSum = cm[r].reduce((a, b) => a + b, 0) || 1;
+      for (let c = 0; c < 5; c++) {
+        const val = cm[r][c];
+        const pct = ((val / rowSum) * 100).toFixed(0);
+        const isDiag = (r === c);
+
+        let bg = 'rgba(255,255,255,0.03)';
+        let textColor = '#F1F5F9';
+        if (isDiag && val > 0) {
+          bg = `rgba(16, 185, 129, ${Math.max(0.2, val / 10)})`;
+          textColor = '#34D399';
+        } else if (!isDiag && val > 0) {
+          bg = `rgba(239, 68, 68, ${Math.max(0.15, val / 10)})`;
+          textColor = '#F87171';
+        }
+
+        html += `
+          <td style="background: ${bg}; color: ${textColor};" title="Aktual: Grade ${r}, Prediksi: Grade ${c} (${val} sampel)">
+            ${val}
+            <small>${pct}%</small>
+          </td>
+        `;
+      }
+      html += `</tr>`;
+    }
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+  }
+
+  function renderPerClassTable(metrics) {
+    const tbody = document.getElementById('perClassTableBody');
+    tbody.innerHTML = '';
+    metrics.forEach(m => {
+      const tr = document.createElement('tr');
+      const gradeColor = `var(--${GRADE_CLASSES[m.grade]})`;
+      tr.innerHTML = `
+        <td><b style="color: ${gradeColor};">Grade ${m.grade}</b> (${m.label})</td>
+        <td>${(m.precision * 100).toFixed(1)}%</td>
+        <td>${(m.recall * 100).toFixed(1)}%</td>
+        <td>${(m.f1 * 100).toFixed(1)}%</td>
+        <td><b>${m.correct}</b> / ${m.support}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderBenchmarkTable(samples) {
+    const tbody = document.getElementById('benchmarkTableBody');
+    tbody.innerHTML = '';
+
+    // Update filter counts
+    const cntAll = samples.length;
+    const cntCorrect = samples.filter(s => s.is_correct).length;
+    const cntWrong = samples.filter(s => !s.is_correct).length;
+    const cntFN = samples.filter(s => s.referable_true && !s.referable_pred).length;
+
+    document.getElementById('cntAll').textContent = cntAll;
+    document.getElementById('cntCorrect').textContent = cntCorrect;
+    document.getElementById('cntWrong').textContent = cntWrong;
+    document.getElementById('cntFN').textContent = cntFN;
+
+    const filtered = samples.filter(s => {
+      if (activeBenchmarkFilter === 'correct') return s.is_correct;
+      if (activeBenchmarkFilter === 'wrong') return !s.is_correct;
+      if (activeBenchmarkFilter === 'fn') return (s.referable_true && !s.referable_pred);
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 20px 0;">Tidak ada sampel pada filter ini.</td></tr>`;
       return;
     }
-    showLogin(false);
-    if (!res.ok || !st.ok) throw new Error();
-    const fresh = await res.json();
-    const changed = JSON.stringify(fresh.map(r => r.id)) !== JSON.stringify(results.map(r => r.id));
-    results = fresh;
-    renderStats(await st.json());
-    if (changed) render();
-    $("status").textContent = "Terhubung, diperbarui " + new Date().toLocaleTimeString("id-ID");
-    $("status").className = "";
-  } catch {
-    $("status").textContent = "Server tidak merespons. Pastikan uvicorn masih berjalan.";
-    $("status").className = "offline";
-  }
-}
 
-$("file").onchange = async (e) => {
-  const f = e.target.files[0];
-  if (!f) return;
-  $("uploadMsg").textContent = "Menganalisis " + f.name + "…";
-  const fd = new FormData();
-  fd.append("file", f);
-  try {
-    const res = await fetch("/api/upload", { method: "POST", body: fd });
-    if (res.status === 401) { showLogin(true); return; }
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "Gagal menganalisis gambar.");
-    $("uploadMsg").textContent = `${f.name}: ${data.label} (${pct(data.confidence)})`;
-    selectedId = null;
-    await refresh();
-    render();
-  } catch (err) {
-    $("uploadMsg").textContent = err.message;
-  }
-  e.target.value = "";
-};
+    filtered.forEach(s => {
+      const tr = document.createElement('tr');
+      tr.style.cursor = 'pointer';
+      tr.addEventListener('click', () => {
+        testSampleDirectly({
+          grade: s.true_grade,
+          filename: s.filename,
+          url: s.image_url,
+          label: s.true_label
+        });
+      });
 
-$("loginForm").onsubmit = async (e) => {
-  e.preventDefault();
-  $("loginMsg").textContent = "";
-  try {
-    const res = await fetch("/api/login", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: $("key").value }),
+      const isRefTrue = s.referable_true;
+      const isRefPred = s.referable_pred;
+      let screeningBadge = '';
+      if (isRefTrue && isRefPred) screeningBadge = '<span class="badge badge-ref-yes">TP: Rujuk Tepat</span>';
+      else if (!isRefTrue && !isRefPred) screeningBadge = '<span class="badge badge-ref-no">TN: Aman Tepat</span>';
+      else if (isRefTrue && !isRefPred) screeningBadge = '<span class="badge badge-mismatch">FN: Terlewat!</span>';
+      else screeningBadge = '<span class="badge badge-mismatch">FP: Rujukan Semu</span>';
+
+      tr.innerHTML = `
+        <td><img src="${s.image_url}" class="tbl-thumb" alt="${s.id}"></td>
+        <td><code style="font-size: 11px;">${s.id}</code></td>
+        <td><span class="badge badge-g${s.true_grade}">G${s.true_grade}: ${s.true_label}</span></td>
+        <td><span class="badge badge-g${s.pred_grade}">G${s.pred_grade}: ${s.pred_label}</span></td>
+        <td>${(s.confidence * 100).toFixed(1)}%</td>
+        <td>${(s.p_referable * 100).toFixed(1)}%</td>
+        <td>${screeningBadge}</td>
+        <td>${s.latency_ms} ms</td>
+      `;
+      tbody.appendChild(tr);
     });
-    if (!res.ok) throw new Error("API key salah.");
-    $("key").value = "";
-    results = [];
-    await refresh();
-  } catch (err) {
-    $("loginMsg").textContent = err.message || "Server tidak merespons.";
   }
-};
 
-refresh();
-setInterval(refresh, 4000);
+  // Filter buttons for benchmark table
+  document.querySelectorAll('#benchFilterGroup .filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#benchFilterGroup .filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeBenchmarkFilter = btn.dataset.filter;
+      if (benchmarkData && benchmarkData.samples) {
+        renderBenchmarkTable(benchmarkData.samples);
+      }
+    });
+  });
+
+  // Export CSV
+  document.getElementById('btnExportCSV').addEventListener('click', () => {
+    if (!benchmarkData || !benchmarkData.samples) {
+      alert('Jalankan evaluasi terlebih dahulu sebelum mengunduh laporan.');
+      return;
+    }
+    let csv = "ID,Filename,TrueGrade,TrueLabel,PredGrade,PredLabel,Confidence,P_Referable,ReferableTrue,ReferablePred,IsCorrect,LatencyMs\n";
+    benchmarkData.samples.forEach(s => {
+      csv += `"${s.id}","${s.filename}",${s.true_grade},"${s.true_label}",${s.pred_grade},"${s.pred_label}",${s.confidence},${s.p_referable},${s.referable_true},${s.referable_pred},${s.is_correct},${s.latency_ms}\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `evaluasi_diabetic_retinopathy_${Date.now()}.csv`;
+    a.click();
+  });
+
+  // TAB 3: BATCH ZIP LOGIC
+  const dropAreaZip = document.getElementById('dropAreaZip');
+  const zipFileInput = document.getElementById('zipFileInput');
+  const btnUploadZip = document.getElementById('btnUploadZip');
+  let selectedZipFile = null;
+
+  dropAreaZip.addEventListener('click', () => zipFileInput.click());
+  dropAreaZip.addEventListener('dragover', (e) => { e.preventDefault(); dropAreaZip.classList.add('dragover'); });
+  dropAreaZip.addEventListener('dragleave', () => dropAreaZip.classList.remove('dragover'));
+  dropAreaZip.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropAreaZip.classList.remove('dragover');
+    if (e.dataTransfer.files.length > 0) {
+      handleZipSelected(e.dataTransfer.files[0]);
+    }
+  });
+  zipFileInput.addEventListener('change', () => {
+    if (zipFileInput.files.length > 0) {
+      handleZipSelected(zipFileInput.files[0]);
+    }
+  });
+
+  function handleZipSelected(file) {
+    if (!file.name.toLowerCase().endsWith('.zip')) {
+      alert('Harap pilih file arsip .ZIP');
+      return;
+    }
+    selectedZipFile = file;
+    document.getElementById('dropZipTitle').textContent = `File ZIP: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`;
+    btnUploadZip.disabled = false;
+  }
+
+  btnUploadZip.addEventListener('click', async () => {
+    if (!selectedZipFile) return;
+    btnUploadZip.disabled = true;
+    document.getElementById('batchProgress').classList.remove('hidden');
+    document.getElementById('batchResultContainer').classList.add('hidden');
+
+    const form = new FormData();
+    form.append('file', selectedZipFile);
+    form.append('threshold', activeThreshold);
+
+    try {
+      const res = await fetch('/api/evaluate/batch', { method: 'POST', body: form });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Gagal mengevaluasi ZIP.');
+      }
+      const data = await res.json();
+      renderBatchResult(data);
+    } catch (e) {
+      alert('Error evaluasi batch: ' + e.message);
+    } finally {
+      btnUploadZip.disabled = false;
+      document.getElementById('batchProgress').classList.add('hidden');
+    }
+  });
+
+  function renderBatchResult(data) {
+    const container = document.getElementById('batchResultContainer');
+    container.classList.remove('hidden');
+    const grid = document.getElementById('batchKpiGrid');
+    grid.innerHTML = `
+      <div class="kpi-card" style="--card-accent: #3B82F6;">
+        <span class="kpi-label">Sampel Berhasil Diuji</span>
+        <span class="kpi-value">${data.total_samples}</span>
+        <span class="kpi-sub">Total citra valid dalam ZIP</span>
+      </div>
+      <div class="kpi-card" style="--card-accent: #10B981;">
+        <span class="kpi-label">Akurasi Multikelas</span>
+        <span class="kpi-value">${(data.accuracy * 100).toFixed(1)}%</span>
+        <span class="kpi-sub">QWK: ${data.kappa.toFixed(4)}</span>
+      </div>
+      <div class="kpi-card" style="--card-accent: #EF4444;">
+        <span class="kpi-label">Sensitivitas Rujukan</span>
+        <span class="kpi-value">${(data.referable_sensitivity * 100).toFixed(1)}%</span>
+        <span class="kpi-sub">Pasien sakit terdeteksi</span>
+      </div>
+      <div class="kpi-card" style="--card-accent: #F59E0B;">
+        <span class="kpi-label">Spesifisitas</span>
+        <span class="kpi-value">${(data.referable_specificity * 100).toFixed(1)}%</span>
+        <span class="kpi-sub">Akurasi Biner: ${(data.referable_accuracy * 100).toFixed(1)}%</span>
+      </div>
+    `;
+
+    // Also populate benchmark tables with this data
+    benchmarkData = data;
+    renderBenchmarkResults(data);
+    alert(`Evaluasi Batch Selesai! Akurasi: ${(data.accuracy * 100).toFixed(1)}%, Sensitivitas: ${(data.referable_sensitivity * 100).toFixed(1)}%. Hasil dapat ditinjau di tab Uji Akurasi Benchmark.`);
+  }
+
+  // TAB 4: HISTORY LOGIC
+  async function loadHistory() {
+    const tbody = document.getElementById('historyTableBody');
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: var(--text-muted); padding: 30px 0;">Memuat riwayat...</td></tr>`;
+
+    try {
+      const res = await fetch('/api/results?limit=100');
+      const rows = await res.json();
+      if (rows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: var(--text-muted); padding: 30px 0;">Belum ada riwayat hasil pengujian.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = '';
+      rows.forEach(r => {
+        const tr = document.createElement('tr');
+        const d = new Date(r.ts * 1000);
+        const timeStr = `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
+
+        let accBadge = '<span style="color: var(--text-muted);">-</span>';
+        if (r.is_correct !== null && r.is_correct !== undefined) {
+          accBadge = r.is_correct
+            ? '<span class="badge badge-match">Benar</span>'
+            : '<span class="badge badge-mismatch">Salah</span>';
+        }
+
+        tr.innerHTML = `
+          <td><small style="color: var(--text-secondary);">${timeStr}</small></td>
+          <td><img src="${r.image_url}" class="tbl-thumb" alt="${r.id}"></td>
+          <td><code style="font-size: 11px;">${r.id}</code></td>
+          <td><small>${r.source || 'web'}</small></td>
+          <td><span class="badge badge-g${r.grade}">G${r.grade}: ${r.label}</span></td>
+          <td>${(r.confidence * 100).toFixed(1)}%</td>
+          <td>${(r.p_referable * 100).toFixed(1)}%</td>
+          <td>${r.referable ? '<span class="badge badge-ref-yes">Perlu Rujuk</span>' : '<span class="badge badge-ref-no">Aman</span>'}</td>
+          <td>${r.true_grade !== null && r.true_grade !== undefined ? `<span class="badge badge-g${r.true_grade}">G${r.true_grade}</span>` : '-'}</td>
+          <td>${accBadge}</td>
+          <td>${r.latency_ms} ms</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: var(--g3); padding: 30px 0;">Gagal memuat riwayat: ${e.message}</td></tr>`;
+    }
+  }
+
+  document.getElementById('btnRefreshHistory').addEventListener('click', loadHistory);
+  document.getElementById('btnClearHistory').addEventListener('click', async () => {
+    if (!confirm('Yakin ingin membersihkan semua riwayat pengujian?')) return;
+    try {
+      await fetch('/api/results', { method: 'DELETE' });
+      loadHistory();
+    } catch (e) {
+      alert('Gagal membersihkan riwayat: ' + e.message);
+    }
+  });
+
+  // Start
+  init();
+
+  // ===== Kamera ESP32 =====
+  // Dashboard meminta foto lewat server; ESP32 menanyakan perintah tiap 1,5 detik (/api/device/poll).
+  const cam = {
+    timer: null,
+    device: null,          // id perangkat yang dipilih (terbaru terlihat)
+    waitingSince: null,    // waktu tombol Ambil Foto diklik
+    lastResultId: null,    // id hasil terakhir saat tombol diklik
+    selectedId: null,      // id hasil yang sedang ditampilkan
+    results: [],
+    settingsFor: null,     // perangkat yang pengaturannya sudah dimuat ke form
+    settingsDirty: false,  // form diubah tapi belum disimpan
+  };
+
+  function escapeHtml(v) {
+    return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function agoText(ts) {
+    const sec = Math.max(0, Math.round(Date.now() / 1000 - ts));
+    if (sec < 5) return 'baru saja';
+    if (sec < 60) return `${sec} detik lalu`;
+    if (sec < 3600) return `${Math.round(sec / 60)} menit lalu`;
+    return new Date(ts * 1000).toLocaleString();
+  }
+
+  function setCamMsg(text, isError) {
+    const el = document.getElementById('camMsg');
+    el.textContent = text || '';
+    el.classList.toggle('error', !!isError);
+  }
+
+  function renderCamResult(r) {
+    const box = document.getElementById('camResult');
+    const img = document.getElementById('camImage');
+    const ph = document.getElementById('camPlaceholder');
+    if (!r) {
+      img.hidden = true; ph.hidden = false;
+      document.getElementById('camResultTime').textContent = 'Belum ada hasil';
+      box.innerHTML = '<p class="cam-placeholder">Hasil analisis foto terbaru akan tampil di sini.</p>';
+      return;
+    }
+    cam.selectedId = r.id;
+    if (img.getAttribute('src') !== r.image_url) img.src = r.image_url;
+    img.hidden = false; ph.hidden = true;
+    document.getElementById('camResultTime').textContent =
+      `${new Date(r.ts * 1000).toLocaleString()} · ${escapeHtml(r.device)}`;
+    const q = r.quality || {};
+    const warn = q.ok === false
+      ? `<div class="cam-warn">Kualitas foto kurang (${escapeHtml((q.issues || []).join(', '))}). Hasil di bawah tidak dapat diandalkan, ulangi pengambilan foto.</div>`
+      : '';
+    box.innerHTML = `
+      ${warn}
+      <div><span class="badge badge-g${r.grade}" style="font-size: 14px; padding: 6px 12px;">G${r.grade}: ${escapeHtml(r.label)}</span></div>
+      <div>
+        <div class="cam-row"><span>Rujukan</span><span>${r.referable ? '<span class="badge badge-ref-yes">Perlu Rujuk</span>' : '<span class="badge badge-ref-no">Aman</span>'}</span></div>
+        <div class="cam-row"><span>Keyakinan grade</span><span>${(r.confidence * 100).toFixed(1)}%</span></div>
+        <div class="cam-row"><span>Peluang perlu rujuk (P<sub>ref</sub>)</span><span>${(r.p_referable * 100).toFixed(1)}%</span></div>
+        <div class="cam-row"><span>Kecerahan / ketajaman</span><span>${q.brightness ?? '-'} / ${q.sharpness ?? '-'}</span></div>
+        <div class="cam-row"><span>Waktu inferensi</span><span>${r.latency_ms} ms</span></div>
+      </div>`;
+    document.querySelectorAll('#camStrip button').forEach(b =>
+      b.setAttribute('aria-current', String(b.dataset.id === r.id)));
+  }
+
+  function renderCamStrip() {
+    const strip = document.getElementById('camStrip');
+    if (!cam.results.length) { strip.innerHTML = '<span class="cam-meta">Belum ada foto.</span>'; return; }
+    strip.innerHTML = cam.results.map(r => `
+      <button type="button" data-id="${escapeHtml(r.id)}" aria-current="${r.id === cam.selectedId}">
+        <img src="${escapeHtml(r.image_url)}" alt="" loading="lazy">
+        <small>G${r.grade} · ${new Date(r.ts * 1000).toLocaleTimeString()}</small>
+      </button>`).join('');
+  }
+
+  document.getElementById('camStrip').addEventListener('click', e => {
+    const b = e.target.closest('button[data-id]');
+    if (!b) return;
+    const r = cam.results.find(x => x.id === b.dataset.id);
+    if (r) renderCamResult(r);
+  });
+
+  async function refreshCamera() {
+    try {
+      const [devRes, resRes] = await Promise.all([fetch('/api/devices'), fetch('/api/results?limit=60')]);
+      if (!devRes.ok || !resRes.ok) throw new Error(`HTTP ${devRes.status}/${resRes.status}`);
+      const devices = await devRes.json();
+      const results = (await resRes.json()).filter(r => r.source === 'esp32').slice(0, 12);
+
+      // Utamakan perangkat yang sedang online; tetap pada pilihan sebelumnya jika masih online
+      const dev = devices.find(d => d.id === cam.device && d.online) || devices.find(d => d.online)
+        || devices.find(d => d.id === cam.device) || devices[0] || null;
+      cam.device = dev ? dev.id : null;
+      const dot = document.getElementById('camDot');
+      const name = document.getElementById('camName');
+      const btn = document.getElementById('btnCapture');
+      if (!dev) {
+        dot.classList.add('offline');
+        name.textContent = 'Belum ada ESP32 terhubung';
+        btn.disabled = true;
+      } else {
+        dot.classList.toggle('offline', !dev.online);
+        name.textContent = `${dev.id} · ${dev.online ? 'online' : 'offline'}${dev.ip ? ' · ' + dev.ip : ''}`;
+        btn.disabled = !dev.online || cam.waitingSince !== null;
+        if (!dev.online && cam.waitingSince === null) {
+          setCamMsg(`Terakhir terlihat ${agoText(dev.last_seen)}. Pastikan ESP32 menyala dan tersambung WiFi.`, true);
+        } else if (dev.online && cam.waitingSince === null && document.getElementById('camMsg').classList.contains('error')) {
+          setCamMsg('');
+        }
+      }
+
+      if (dev && cam.settingsFor !== dev.id) await loadCamSettings(dev.id);
+      renderCamSync(dev);
+
+      const newest = results[0];
+      const changed = results.map(r => r.id).join() !== cam.results.map(r => r.id).join();
+      cam.results = results;
+      if (cam.waitingSince !== null) {
+        if (newest && newest.id !== cam.lastResultId) {
+          cam.waitingSince = null;
+          document.getElementById('camOverlay').hidden = true;
+          setCamMsg('Foto diterima dan sudah dianalisis.');
+          renderCamResult(newest);
+        } else if (Date.now() - cam.waitingSince > 40000) {
+          cam.waitingSince = null;
+          document.getElementById('camOverlay').hidden = true;
+          setCamMsg('ESP32 tidak mengirim foto dalam 40 detik. Cek koneksi WiFi dan daya perangkat, lalu coba lagi.', true);
+        }
+      } else if (changed && newest && (!cam.selectedId || cam.selectedId === cam.results[1]?.id || !results.some(r => r.id === cam.selectedId))) {
+        // Foto baru masuk (mis. dari tombol fisik): tampilkan otomatis
+        renderCamResult(newest);
+      } else if (!cam.selectedId && newest) {
+        renderCamResult(newest);
+      }
+      if (changed) renderCamStrip();
+    } catch (e) {
+      setCamMsg(`Gagal memuat status kamera: ${e.message}`, true);
+    }
+  }
+
+  document.getElementById('btnCapture').addEventListener('click', async () => {
+    if (!cam.device) return;
+    const btn = document.getElementById('btnCapture');
+    btn.disabled = true;
+    cam.lastResultId = cam.results[0]?.id ?? null;
+    try {
+      const res = await fetch(`/api/devices/${encodeURIComponent(cam.device)}/capture`, { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      cam.waitingSince = Date.now();
+      document.getElementById('camOverlay').hidden = false;
+      setCamMsg('Perintah terkirim. ESP32 akan memotret dalam beberapa detik.');
+    } catch (e) {
+      setCamMsg(`Gagal meminta foto: ${e.message}`, true);
+      btn.disabled = false;
+    }
+  });
+
+  function startCamera() {
+    if (cam.timer) return;
+    refreshCamera();
+    cam.timer = setInterval(refreshCamera, 2000);
+  }
+  function stopCamera() {
+    clearInterval(cam.timer);
+    cam.timer = null;
+  }
+
+  // ----- Pengaturan kamera -----
+  const CAM_DEFAULTS = {
+    resolution: 'SVGA', jpeg_quality: 10, brightness: 0, contrast: 0, saturation: 0, ae_level: 0,
+    awb: true, hmirror: false, vflip: false, flash_mode: 'capture', flash_intensity: 128,
+  };
+  const camForm = document.getElementById('camSettingsForm');
+
+  function updateCamOutputs() {
+    const v = id => document.getElementById(id).value;
+    const signed = x => (x > 0 ? '+' : '') + x;
+    document.getElementById('outQuality').textContent = v('setQuality');
+    document.getElementById('outAe').textContent = signed(+v('setAe'));
+    document.getElementById('outBrightness').textContent = signed(+v('setBrightness'));
+    document.getElementById('outContrast').textContent = signed(+v('setContrast'));
+    document.getElementById('outSaturation').textContent = signed(+v('setSaturation'));
+    document.getElementById('outFlash').textContent = Math.round(v('setFlashIntensity') / 255 * 100) + '%';
+    const flashOff = camForm.elements.flash_mode.value === 'off';
+    document.getElementById('setFlashIntensity').disabled = flashOff;
+  }
+
+  function fillCamForm(cfg) {
+    const c = { ...CAM_DEFAULTS, ...cfg };
+    document.getElementById('setResolution').value = c.resolution;
+    document.getElementById('setQuality').value = c.jpeg_quality;
+    document.getElementById('setAe').value = c.ae_level;
+    document.getElementById('setBrightness').value = c.brightness;
+    document.getElementById('setContrast').value = c.contrast;
+    document.getElementById('setSaturation').value = c.saturation;
+    document.getElementById('setFlashIntensity').value = c.flash_intensity;
+    document.getElementById('setAwb').checked = c.awb;
+    document.getElementById('setHmirror').checked = c.hmirror;
+    document.getElementById('setVflip').checked = c.vflip;
+    camForm.elements.flash_mode.value = c.flash_mode;
+    updateCamOutputs();
+  }
+
+  function readCamForm() {
+    const n = id => parseInt(document.getElementById(id).value, 10);
+    return {
+      resolution: document.getElementById('setResolution').value,
+      jpeg_quality: n('setQuality'), ae_level: n('setAe'),
+      brightness: n('setBrightness'), contrast: n('setContrast'), saturation: n('setSaturation'),
+      awb: document.getElementById('setAwb').checked,
+      hmirror: document.getElementById('setHmirror').checked,
+      vflip: document.getElementById('setVflip').checked,
+      flash_mode: camForm.elements.flash_mode.value || 'capture',
+      flash_intensity: n('setFlashIntensity'),
+    };
+  }
+
+  async function loadCamSettings(deviceId) {
+    try {
+      const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/settings`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      fillCamForm(await res.json());
+      cam.settingsFor = deviceId;
+      cam.settingsDirty = false;
+    } catch (e) {
+      document.getElementById('camSync').textContent = `Gagal memuat pengaturan: ${e.message}`;
+    }
+  }
+
+  function renderCamSync(dev) {
+    const el = document.getElementById('camSync');
+    document.getElementById('btnSaveSettings').disabled = !dev;
+    el.className = 'cam-sync';
+    if (!dev) { el.textContent = 'Belum ada perangkat untuk diatur.'; return; }
+    if (cam.settingsDirty) { el.textContent = 'Ada perubahan yang belum disimpan.'; el.classList.add('pending'); return; }
+    if (!dev.online) { el.textContent = `Perangkat offline. Pengaturan v${dev.settings_version} akan diterapkan saat online.`; return; }
+    if (dev.applied_version === dev.settings_version) {
+      el.textContent = `Pengaturan v${dev.settings_version} aktif di perangkat.`; el.classList.add('ok');
+    } else {
+      el.textContent = `Menunggu perangkat menerapkan v${dev.settings_version}...`; el.classList.add('pending');
+    }
+  }
+
+  camForm.addEventListener('input', () => { cam.settingsDirty = true; updateCamOutputs(); renderCamSync({ online: true }); });
+  document.getElementById('btnCamDefaults').addEventListener('click', () => {
+    fillCamForm(CAM_DEFAULTS); cam.settingsDirty = true; renderCamSync({ online: true });
+  });
+
+  camForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    if (!cam.device) return;
+    const btn = document.getElementById('btnSaveSettings');
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/api/devices/${encodeURIComponent(cam.device)}/settings`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(readCamForm()),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(typeof err.detail === 'string' ? err.detail : `HTTP ${res.status}`);
+      }
+      fillCamForm(await res.json());
+      cam.settingsDirty = false;
+      refreshCamera();
+    } catch (err) {
+      const el = document.getElementById('camSync');
+      el.className = 'cam-sync'; el.style.color = 'var(--g3)';
+      el.textContent = `Gagal menyimpan: ${err.message}`;
+      setTimeout(() => { el.style.color = ''; }, 4000);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  fillCamForm(CAM_DEFAULTS);
 </script>
+
 </body>
 </html>

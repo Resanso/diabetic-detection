@@ -1,0 +1,14 @@
+.git
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.venv
+venv
+retina-dr.zip
+training/
+esp32/
+*.md
+.DS_Store
+.idea
+.vscode

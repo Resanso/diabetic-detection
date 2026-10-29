@@ -73,11 +73,12 @@ python -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# taruh dr_model.onnx dan metadata.json ke server/model/
-uvicorn app:app --host 0.0.0.0 --port 8000
+# dr_model.onnx dan metadata.json sudah tersedia di server/model/
+# jalankan server (gunakan port 8001 jika port 8000 dipakai aplikasi lain):
+uvicorn app:app --host 0.0.0.0 --port 8001
 ```
 
-Buka dashboard di `http://localhost:8000`. Uji dulu tanpa ESP32 dengan mengunggah satu gambar dari dataset APTOS lewat panel "Unggah gambar", atau dengan curl:
+Buka dashboard web di browser: **`http://localhost:8001`**.
 
 ```bash
 curl -X POST --data-binary @contoh_fundus.jpg -H "Content-Type: image/jpeg" \
@@ -99,14 +100,25 @@ Akibatnya hasil bisa berlabel "Tidak ada DR" tapi tetap ditandai perlu dirujuk; 
 
 | Endpoint | Fungsi |
 |---|---|
-| `POST /api/predict` | Body = JPEG mentah. Header `X-Device-Id`, opsional `X-API-Key`. Respons ringkas untuk ESP32. |
+| `GET /` | Web Dashboard interaktif untuk uji skrining dan evaluasi akurasi model. |
+| `POST /api/benchmark/evaluate` | Evaluasi akurasi otomatis pada 50 sampel fundus terverifikasi (menghasilkan akurasi, QWK, sensitivitas, spesifisitas, matriks konfusi 5x5 dan 2x2). |
+| `POST /api/benchmark/tune-threshold` | Menyetel ulang ambang probabilitas rujukan secara instan dari hasil yang tersimpan. |
+| `POST /api/evaluate/single` | Uji satu citra dengan opsional label Ground Truth, menghasilkan visual pra-pemrosesan dan peta atensi lesi retina. |
+| `POST /api/evaluate/batch` | Unggah file `.zip` berisi citra retina kustom untuk evaluasi akurasi massal otomatis. |
+| `GET /api/benchmark/samples` | Mengambil daftar 50 sampel benchmark per grade (0..4). |
+| `GET /api/model/info` | Informasi arsitektur model, ukuran citra input, label, dan metrik referensi. |
+| `POST /api/predict` | Body = JPEG mentah. Header `X-Device-Id`, opsional `X-API-Key`. Respons ringkas untuk ESP32-CAM. |
+| `GET /api/device/poll` | Dipanggil ESP32 tiap 1,5 detik (header `X-Device-Id`). Menandai perangkat online dan mengembalikan `{"capture": true}` bila dashboard meminta foto. |
+| `POST /api/devices/{id}/capture` | Meminta perangkat memotret (tombol "Ambil Foto" di tab Kamera ESP32). 409 jika perangkat offline. |
+| `GET /api/devices` | Daftar perangkat: status online, IP, dan hasil terbaru. Disimpan di memori, hilang saat server restart. |
+| `GET/PUT /api/devices/{id}/settings` | Pengaturan kamera & flash (resolusi, kompresi JPEG, eksposur, kecerahan, kontras, saturasi, white balance, cermin/balik, mode & intensitas flash). Disimpan di `data/device_settings.json`; ESP32 menerapkannya lewat poll tanpa upload ulang firmware. |
 | `POST /api/upload` | Multipart `file`, dipakai dashboard. Respons lengkap (probabilitas semua grade). |
 | `POST /api/login` | Body `{"key": "..."}`. Menyetel cookie sesi untuk dashboard. |
-| `GET /images/{nama}` | Foto yang tersimpan. |
-| `GET /api/results?limit=50` | Riwayat hasil. |
-| `GET /api/stats` | Ringkasan per grade. |
-| `GET /health` | Cek server hidup. |
-
+| `GET /images/{nama}` | Mengambil foto retina yang tersimpan. |
+| `GET /api/results?limit=100` | Riwayat hasil uji dan status pencocokan Ground Truth. |
+| `DELETE /api/results` | Membersihkan log riwayat pengujian. |
+| `GET /api/stats` | Ringkasan statistik per grade. |
+| `GET /health` | Cek status server dan model aktif. |
 Contoh respons `/api/predict`:
 
 ```json
@@ -119,11 +131,19 @@ Contoh respons `/api/predict`:
 
 1. Arduino IDE → Board Manager → install **esp32 by Espressif**. Pilih board **AI Thinker ESP32-CAM**, partition **Huge APP**.
 2. Library Manager → install **ArduinoJson** (versi 7).
-3. Buka `esp32/esp32_cam_client/esp32_cam_client.ino`, isi `WIFI_SSID`, `WIFI_PASS`, dan `SERVER_URL` (IP server dari tahap 2).
-4. Upload (pakai ESP32-CAM-MB atau FTDI; GPIO0 ke GND saat upload).
+3. Salin `esp32/esp32_cam_client/secrets.example.h` menjadi `secrets.h` (di-gitignore), isi SSID/password WiFi 2.4 GHz dan `SERVER_URL` (IP server dari tahap 2, port 8001).
+4. Upload (pakai ESP32-CAM-MB atau FTDI; GPIO0 ke GND saat upload). Dengan arduino-cli:
+   `arduino-cli compile --upload -p /dev/cu.usbserial-XXXX --fqbn esp32:esp32:esp32cam:PartitionScheme=huge_app esp32/esp32_cam_client`
+   Pada sebagian ESP32-CAM-MB, tombol RST dan reset otomatis tidak bekerja. Masuk mode download dengan menahan IO0 sambil mencolok USB;
+   setelah upload, cabut lalu colok USB lagi (tanpa IO0) untuk menjalankan firmware. Jika upload gagal `No serial data received`,
+   tekan ESP32-CAM sampai benar-benar mentok di MB (pin U0R yang longgar adalah penyebab umum).
 5. Buka Serial Monitor 115200. Tekan tombol di GPIO13 (ke GND) atau ketik `c`.
 
-Hasil muncul di Serial Monitor, dan dashboard otomatis memperbarui dalam 4 detik.
+Pengaturan kualitas foto dan flash ada di kartu **Pengaturan Kamera & Flash** pada tab yang sama. Flash default menyala
+saat memotret dengan intensitas 50%; mode "Selalu nyala" hanya untuk membidik sebentar.
+Bisa juga memotret dari web: buka dashboard, tab **Kamera ESP32**, tunggu status online, lalu klik **Ambil Foto**.
+Tab ini otomatis menampilkan foto dan hasil terbaru (diperbarui tiap 2 detik), termasuk foto dari tombol fisik.
+Hasil juga muncul di Serial Monitor dan di tab Riwayat & Log.
 LED merah: 1 kedipan = tidak perlu rujukan, 3 kedipan = perlu rujukan, 5 kedipan cepat = error.
 
 ---
