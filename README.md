@@ -19,6 +19,42 @@ server/     app.py, preprocess.py, static/dashboard.html, model/
 esp32/      esp32_cam_client.ino
 ```
 
+
+## Aplikasi web Retinova (perawat, dokter, admin)
+
+Desain dan bahasa mengikuti `docs/BRAND.md`. Kode di `web/` (React + Vite), hasil build dilayani FastAPI.
+
+| Peran | Pekerjaan |
+|---|---|
+| Perawat | daftar/cari pasien, isi data klinis (gula darah, tekanan darah, visus, keluhan), foto retina mata kanan & kiri lewat **kamera HP + lensa fundus** atau **ESP32-CAM**, kirim ke dokter, lihat hasil bacaan, bantu antrean (tandai hadir, pasien datang langsung) |
+| Dokter | layar antrean pasien (panggil berikutnya, selesai, tidak hadir), jadwal praktik dan pratinjau mingguan, bacaan foto yang diurutkan risiko AI, penampil foto (zoom, kontras, peta lesi), keputusan rujukan; bisa juga memotret sendiri |
+| Admin | kelola akun (termasuk akun pasien), jadwal semua dokter, perangkat ESP32, bersihkan data uji, lab model di `/lab` |
+| Pasien | daftar sendiri dengan NIK, pilih cara bayar (BPJS, asuransi, umum), booking sesi dokter dan langsung dapat nomor antrean, ambil antrean di klinik, tandai hadir, pantau nomor yang sedang dilayani |
+
+Akun pasien hanya bisa mengakses data dirinya sendiri (profil, booking, antrean). Semua endpoint klinis menolak akun pasien.
+Nomor antrean urut per sesi (jadwal dokter + tanggal). Booking paling jauh `BOOK_DAYS` hari ke depan; antrean di
+klinik dibuka 1 jam sebelum praktik. Dokter memanggil nomor terkecil yang sudah hadir.
+
+Akun pertama dibuat dari layar masuk saat database masih kosong (otomatis menjadi admin).
+Kamera HP langsung di browser **butuh HTTPS**. Tanpa HTTPS, aplikasi memakai kamera bawaan HP sebagai cadangan.
+
+Pengembangan lokal:
+
+```bash
+cd server && uvicorn app:app --port 8001          # API
+cd web && npm install && npm run dev               # http://localhost:5173 (proxy ke :8001)
+cd web && npm run build                            # build ke server/static/app
+```
+
+Variabel lingkungan server: `DEVICE_KEY` (kunci ESP32, header `X-API-Key`), `COOKIE_SECURE=1` di HTTPS,
+`SHOW_AI_TO_NURSE=1` jika perawat boleh melihat perkiraan AI, `REF_PROB` ambang rujukan,
+`CLINIC_TZ` zona waktu klinik (bawaan `Asia/Jakarta`), `BOOK_DAYS` jendela booking (bawaan 14).
+
+**BPJS (VClaim).** Isi `BPJS_CONS_ID`, `BPJS_SECRET`, `BPJS_USER_KEY` dari BPJS Kesehatan (didapat faskes setelah
+kerja sama), dan `BPJS_BASE_URL` (bawaan server pengembangan `https://apijkn-dev.bpjs-kesehatan.go.id/vclaim-rest-dev`).
+Tanpa kredensial, nomor kartu tetap disimpan dan tombol cek status disembunyikan. Klien ada di `server/bpjs.py`.
+Di ESP32, isi `SECRET_API_KEY` dengan nilai `DEVICE_KEY` dan `SECRET_SERVER_URL` dengan `http://<server>:8000/api/predict`.
+
 ---
 
 ## Tahap 1: Training model (Kaggle, gratis GPU)
@@ -56,7 +92,10 @@ Cara membaca metrik:
 - **sens_ref** (sensitivitas referable) paling penting untuk skrining: berapa persen pasien yang perlu dirujuk berhasil terdeteksi. Usahakan setinggi mungkin.
 - **spec_ref** (spesifisitas) adalah berapa persen pasien sehat yang benar dinyatakan tidak perlu rujukan.
 
-5. Download dari `/kaggle/working/output/`: **`dr_model.onnx`** dan **`metadata.json`**.
+5. Download dari `/kaggle/working/output/`: **`dr_model.onnx`** dan **`metadata.json`**. Metadata memuat precision,
+   recall, dan F1 per grade, metrik rujukan (precision, recall, F1, spesifisitas, NPV), serta `onnx_test_metrics`:
+   metrik test yang dihitung ulang dari file ONNX yang dipakai server.
+6. Deploy: salin kedua file ke `server/model/` di VPS, lalu `./deploy/deploy.sh` (selalu membackup `server/data` dulu).
 
 Tips meningkatkan akurasi: naikkan `IMG_SIZE` di `preprocess.py` ke 384 atau 512, ganti `--model efficientnet_b3`,
 atau tambahkan data EyePACS 2015. Setiap kali `preprocess.py` diubah, salin juga ke folder `server/` dan training ulang.
@@ -155,8 +194,12 @@ mengeluarkan grade walau gambarnya tidak bermakna. Untuk prototype, pasang lensa
 (teknik *indirect ophthalmoscopy*) atau mulai dengan menguji memakai gambar dataset lewat dashboard.
 Jangan arahkan LED flash langsung ke mata.
 
-**Kualitas gambar.** Server memberi tanda "terlalu gelap / terlalu terang / buram" berdasarkan cek sederhana.
-Ini bukan pengganti model kualitas gambar, tapi membantu menyaring foto yang jelas tidak layak.
+**Kualitas gambar.** Setiap foto dicek dulu oleh `quality_check` di `server/preprocess.py` (11 parameter: warna,
+bentuk lingkaran retina, kecerahan, silau, ketajaman, kontras). Ambangnya dikalibrasi pada 3.662 foto APTOS asli
+dengan `training/quality_calibration.py` (notebook `training/kaggle_quality_calibration.ipynb`): 100% foto APTOS
+dikenali sebagai fundus dan 98,5% lolos semua cek, sedangkan foto ESP32 non-fundus dan foto yang sudah diolah ditolak.
+Foto yang bukan fundus tetap disimpan, tetapi perkiraan AI-nya disembunyikan dan tidak ikut kesimpulan pemeriksaan.
+Semua parameter dan ambangnya tampil di Lab (`/lab`). Ini bukan pengganti model kualitas gambar terlatih.
 
 **Domain shift.** Model dilatih dari foto kamera fundus klinis. Foto dari ESP32 akan sangat berbeda (resolusi,
 warna, noise), sehingga akurasi di dunia nyata pasti lebih rendah dari metrik validasi. Kumpulkan foto dari

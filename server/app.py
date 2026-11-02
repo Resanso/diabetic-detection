@@ -1,115 +1,58 @@
 """
-Server skrining Diabetic Retinopathy (DR) terintegrasi sistem pengujian akurasi:
-1. Endpoint ESP32-CAM (/api/predict - JPEG raw)
-2. Endpoint Single Test dengan Ground Truth (/api/evaluate/single)
-3. Endpoint Benchmark Otomatis (/api/benchmark/evaluate)
-4. Endpoint Batch Upload Dataset Kustom (/api/evaluate/batch)
-5. Endpoint Penyetelan Ambang Batas Sensitivitas Real-Time (/api/benchmark/tune-threshold)
-6. Riwayat, Statistik, dan Dashboard Web interaktif (/ & /api/results)
+Server Retinova: skrining retinopati diabetik.
+
+Modul:
+- clinic.py   akun staf, pasien, pemeriksaan, bacaan dokter (dipakai aplikasi web)
+- devices.py  ESP32-CAM: polling, perintah foto, pengaturan kamera, unggah JPEG (/api/predict)
+- app.py      endpoint lab untuk admin (benchmark, uji batch, penyetelan ambang), file gambar, dan aplikasi web
 """
-import asyncio
 import io
 import json
 import os
 import re
-import secrets
-import shutil
-import sqlite3
-import tempfile
 import time
 import uuid
 import zipfile
-from contextlib import contextmanager
 
-import cv2
 import numpy as np
-import onnxruntime as ort
-from fastapi import Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
-from preprocess import (
-    IMG_SIZE,
-    ben_graham,
-    decode_image,
-    generate_saliency_heatmap,
-    img_to_base64,
-    quality_check,
-    standard_preprocess,
-    to_model_input,
+import appointments
+import clinic
+import devices
+from auth import current_user, require_role
+from database import BASE, DATA_DIR, IMG_DIR, db, init_db, purge_results
+from inference import (
+    INPUT_NAME,
+    LABELS,
+    META,
+    MODEL_IMG_SIZE,
+    PREPROCESS_MODE,
+    REF_GRADE,
+    REF_PROB,
+    row_to_dict,
+    run_inference,
+    session,
+    softmax,
 )
+from preprocess import QC, ben_graham, decode_image, quality_check, standard_preprocess, to_model_input
 
-BASE = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(BASE, "model", "dr_model.onnx"))
-META_PATH = os.getenv("META_PATH", os.path.join(BASE, "model", "metadata.json"))
-DATA_DIR = os.getenv("DATA_DIR", os.path.join(BASE, "data"))
-API_KEY = os.getenv("API_KEY", "")          # kosong = tanpa autentikasi
-MAX_BYTES = 10 * 1024 * 1024                # 10 MB limit untuk batch/upload
-COOKIE_NAME = "dr_session"
-
-IMG_DIR = os.path.join(DATA_DIR, "images")
+MAX_BYTES = devices.MAX_BYTES
 BENCHMARK_DIR = os.path.join(DATA_DIR, "benchmark")
 BENCHMARK_MANIFEST = os.path.join(BENCHMARK_DIR, "manifest.json")
-DB_PATH = os.path.join(DATA_DIR, "results.db")
-os.makedirs(IMG_DIR, exist_ok=True)
 os.makedirs(BENCHMARK_DIR, exist_ok=True)
+init_db()
 
-with open(META_PATH) as f:
-    META = json.load(f)
-LABELS = META["labels"]
-MODEL_IMG_SIZE = META.get("img_size", IMG_SIZE)
-PREPROCESS_MODE = META.get("preprocess_mode", "standard")
-REF_GRADE = META.get("referable_threshold_grade", 2)
-REF_PROB = float(os.getenv("REF_PROB", META.get("referable_prob_threshold", 0.40)))
+app = FastAPI(title="Retinova: Skrining Retinopati Diabetik")
+app.include_router(clinic.router)
+app.include_router(devices.router)
+app.include_router(appointments.router)
 
-session = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
-INPUT_NAME = session.get_inputs()[0].name
-
-
-@contextmanager
-def db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        with conn:
-            yield conn
-    finally:
-        conn.close()
-
-
-with db() as conn:
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS results (
-            id TEXT PRIMARY KEY, ts REAL, device TEXT, source TEXT, filename TEXT,
-            grade INTEGER, label TEXT, confidence REAL, referable INTEGER,
-            probs TEXT, quality TEXT, latency_ms REAL, p_referable REAL,
-            true_grade INTEGER, is_correct INTEGER
-        )""")
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(results)")}
-    if "p_referable" not in cols:
-        conn.execute("ALTER TABLE results ADD COLUMN p_referable REAL")
-    if "true_grade" not in cols:
-        conn.execute("ALTER TABLE results ADD COLUMN true_grade INTEGER")
-    if "is_correct" not in cols:
-        conn.execute("ALTER TABLE results ADD COLUMN is_correct INTEGER")
-
-app = FastAPI(title="Diabetic Retinopathy Screening & Accuracy Evaluation Web")
-
-
-def require_key(x_api_key: str | None = Header(None),
-                dr_session: str | None = Cookie(None)):
-    if not API_KEY:
-        return
-    for key in (x_api_key, dr_session):
-        if key and secrets.compare_digest(key.encode(), API_KEY.encode()):
-            return
-    raise HTTPException(401, "API key salah atau tidak dikirim (header X-API-Key).")
-
-
-def softmax(x):
-    e = np.exp(x - x.max())
-    return e / e.sum()
+ADMIN = Depends(require_role("admin"))
 
 
 def calculate_evaluation_metrics(records: list[dict], ref_prob: float = REF_PROB) -> dict:
@@ -203,114 +146,7 @@ def calculate_evaluation_metrics(records: list[dict], ref_prob: float = REF_PROB
     }
 
 
-def run_inference(data: bytes, device: str, source: str, true_grade: int | None = None) -> dict:
-    """Sinkron dan berat (OpenCV + ONNX). Panggil lewat run_in_threadpool."""
-    if not data:
-        raise HTTPException(400, "Body kosong. Kirim gambar JPEG/PNG.")
-    img = decode_image(data)
-    if img is None:
-        raise HTTPException(400, "File bukan gambar JPEG/PNG yang valid.")
-
-    t0 = time.perf_counter()
-    quality = quality_check(img)
-
-    # Preprocessing sesuai model
-    if PREPROCESS_MODE == "ben_graham":
-        prep_img = ben_graham(img, MODEL_IMG_SIZE)
-    else:
-        prep_img = standard_preprocess(img, MODEL_IMG_SIZE)
-
-    x = to_model_input(prep_img)
-    raw_logits = session.run(None, {INPUT_NAME: x})[0][0]
-    probs = softmax(raw_logits)
-    latency = (time.perf_counter() - t0) * 1000
-
-    grade = int(probs.argmax())
-    p_ref = float(probs[REF_GRADE:].sum())
-    rid = uuid.uuid4().hex[:12]
-    ext = "png" if data[:8] == b"\x89PNG\r\n\x1a\n" else "jpg"
-    filename = f"{rid}.{ext}"
-
-    with open(os.path.join(IMG_DIR, filename), "wb") as f:
-        f.write(data)
-
-    is_correct = (grade == true_grade) if true_grade is not None else None
-    referable_true = (true_grade >= REF_GRADE) if true_grade is not None else None
-
-    # Visualisasi tambahan
-    prep_b64 = img_to_base64(prep_img)
-    heatmap_b64 = generate_saliency_heatmap(img, MODEL_IMG_SIZE)
-
-    result = {
-        "id": rid,
-        "ts": time.time(),
-        "device": device,
-        "source": source,
-        "image_url": f"/images/{filename}",
-        "preprocessed_url": prep_b64,
-        "heatmap_url": heatmap_b64,
-        "grade": grade,
-        "label": LABELS[grade],
-        "confidence": round(float(probs[grade]), 4),
-        "referable": p_ref >= REF_PROB,
-        "p_referable": round(p_ref, 4),
-        "probs": [round(float(p), 4) for p in probs],
-        "quality": quality,
-        "latency_ms": round(latency, 1),
-        "true_grade": true_grade,
-        "true_label": LABELS[true_grade] if true_grade is not None and 0 <= true_grade < 5 else None,
-        "is_correct": is_correct,
-        "referable_true": referable_true,
-    }
-
-    with db() as conn:
-        conn.execute(
-            "INSERT INTO results (id, ts, device, source, filename, grade, label, confidence,"
-            " referable, probs, quality, latency_ms, p_referable, true_grade, is_correct)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (rid, result["ts"], device, source, filename, grade, result["label"],
-             result["confidence"], int(result["referable"]), json.dumps(result["probs"]),
-             json.dumps(quality), result["latency_ms"], result["p_referable"],
-             true_grade, 1 if is_correct else (0 if is_correct is not None else None)))
-    return result
-
-
-def row_to_dict(r):
-    return {
-        "id": r["id"], "ts": r["ts"], "device": r["device"], "source": r["source"],
-        "image_url": f"/images/{r['filename']}", "grade": r["grade"], "label": r["label"],
-        "confidence": r["confidence"], "referable": bool(r["referable"]),
-        "p_referable": r["p_referable"],
-        "probs": json.loads(r["probs"]), "quality": json.loads(r["quality"]),
-        "latency_ms": r["latency_ms"],
-        "true_grade": r["true_grade"] if "true_grade" in r.keys() else None,
-        "is_correct": bool(r["is_correct"]) if "is_correct" in r.keys() and r["is_correct"] is not None else None,
-    }
-
-
-async def read_limited(request: Request) -> bytes:
-    buf = bytearray()
-    async for chunk in request.stream():
-        buf.extend(chunk)
-        if len(buf) > MAX_BYTES:
-            raise HTTPException(413, "Ukuran file melebihi batas maksimum 10 MB.")
-    return bytes(buf)
-
-
-# --- Endpoints ---
-
-@app.get("/health")
-def health():
-    return {
-        "status": "ok",
-        "model": META.get("model"),
-        "img_size": MODEL_IMG_SIZE,
-        "labels": LABELS,
-        "referable_threshold": REF_PROB,
-    }
-
-
-@app.get("/api/model/info")
+@app.get("/api/model/info", dependencies=[ADMIN])
 def model_info():
     return {
         "model": META.get("model", "ResNet-50 APTOS"),
@@ -328,12 +164,18 @@ def model_info():
         "std": META.get("std"),
         "referable_threshold_grade": REF_GRADE,
         "referable_prob_threshold": REF_PROB,
+        "tuned_ref_threshold": META.get("referable_prob_threshold"),
+        "preprocess_mode": META.get("preprocess_mode", "standard"),
+        "selection_metric": META.get("selection_metric"),
         "val_metrics": META.get("val_metrics"),
         "test_metrics": META.get("test_metrics"),
+        "onnx_test_metrics": META.get("onnx_test_metrics"),
+        "onnx_test_pred_agreement": META.get("onnx_test_pred_agreement"),
+        "quality_thresholds": QC,
     }
 
 
-@app.get("/api/benchmark/samples")
+@app.get("/api/benchmark/samples", dependencies=[ADMIN])
 def get_benchmark_samples():
     """Mengembalikan daftar 50 sampel citra benchmark untuk uji cepat per grade."""
     if not os.path.exists(BENCHMARK_MANIFEST):
@@ -343,7 +185,7 @@ def get_benchmark_samples():
     return samples
 
 
-@app.get("/api/benchmark/image/{grade}/{filename}")
+@app.get("/api/benchmark/image/{grade}/{filename}", dependencies=[ADMIN])
 def get_benchmark_image(grade: int, filename: str):
     if not re.fullmatch(r"grade_\d+_sample_\d+\.(jpg|png)", filename):
         raise HTTPException(404, "Nama file tidak valid.")
@@ -353,7 +195,7 @@ def get_benchmark_image(grade: int, filename: str):
     return FileResponse(filepath, media_type="image/jpeg")
 
 
-@app.post("/api/benchmark/evaluate")
+@app.post("/api/benchmark/evaluate", dependencies=[ADMIN])
 async def evaluate_benchmark(threshold: float = Query(None)):
     """Menjalankan evaluasi akurasi menyeluruh pada dataset benchmark bawaan."""
     if not os.path.exists(BENCHMARK_MANIFEST):
@@ -411,6 +253,7 @@ async def evaluate_benchmark(threshold: float = Query(None)):
                 "pred_grade": pred_grade,
                 "pred_label": LABELS[pred_grade],
                 "confidence": round(float(probs[pred_grade]), 4),
+                "quality": quality_check(img),
                 "referable_true": ref_true,
                 "referable_pred": ref_pred,
                 "p_referable": round(p_ref, 4),
@@ -436,7 +279,7 @@ class TuneRequest(BaseModel):
     items: list[dict]
 
 
-@app.post("/api/benchmark/tune-threshold")
+@app.post("/api/benchmark/tune-threshold", dependencies=[ADMIN])
 def tune_threshold(body: TuneRequest):
     """Menghitung ulang sensitivitas & spesifisitas secara instan dari probabilitas yang tersimpan."""
     thresh = float(body.threshold)
@@ -451,7 +294,7 @@ def tune_threshold(body: TuneRequest):
     return metrics
 
 
-@app.post("/api/evaluate/single")
+@app.post("/api/evaluate/single", dependencies=[ADMIN])
 async def evaluate_single(
     file: UploadFile = File(...),
     true_grade: int | None = Form(None),
@@ -465,7 +308,7 @@ async def evaluate_single(
     return await run_in_threadpool(run_inference, data, device, "single_test", t_grade)
 
 
-@app.post("/api/evaluate/batch")
+@app.post("/api/evaluate/batch", dependencies=[ADMIN])
 async def evaluate_batch(file: UploadFile = File(...), threshold: float = Form(None)):
     """
     Unggah file ZIP berisi dataset kustom untuk pengujian akurasi massal.
@@ -557,6 +400,7 @@ async def evaluate_batch(file: UploadFile = File(...), threshold: float = Form(N
                         "pred_grade": pred_grade,
                         "pred_label": LABELS[pred_grade],
                         "confidence": round(float(probs[pred_grade]), 4),
+                        "quality": quality_check(img),
                         "referable_true": ref_true,
                         "referable_pred": ref_pred,
                         "p_referable": round(p_ref, 4),
@@ -581,271 +425,97 @@ async def evaluate_batch(file: UploadFile = File(...), threshold: float = Form(N
     return await run_in_threadpool(_process_zip)
 
 
-# --- Endpoint Asli (Kompatibilitas ESP32 & Dashboard) ---
+# --- Lab: riwayat semua inferensi (termasuk uji), hanya admin ---
 
-# --- Perangkat ESP32: status online & perintah ambil foto dari dashboard ---
-# Disimpan di memori: cukup untuk prototype satu server; hilang saat server restart.
-DEVICES: dict[str, dict] = {}
-DEVICE_ONLINE_SEC = 10        # dianggap offline jika tidak polling selama ini
-CAPTURE_TIMEOUT_SEC = 30      # perintah foto yang tidak diambil dianggap kedaluwarsa
-LIVE_TTL_SEC = 5              # live view berhenti sendiri jika tidak ada penonton selama ini
-
-
-def touch_device(device_id: str, ip: str | None) -> dict:
-    dev = DEVICES.setdefault(device_id, {"capture_requested_at": None, "applied_version": None,
-                                         "live_until": 0.0, "frame": None, "frame_seq": 0, "frame_ts": None})
-    dev["last_seen"] = time.time()
-    dev["ip"] = ip
-    return dev
-
-
-# Pengaturan kamera per perangkat. Disimpan di file agar tetap ada setelah server restart.
-SETTINGS_PATH = os.path.join(DATA_DIR, "device_settings.json")
-RESOLUTIONS = ["VGA", "SVGA", "XGA", "HD", "SXGA", "UXGA"]   # 640x480 ... 1600x1200
-LIVE_RESOLUTIONS = ["QVGA", "HVGA", "VGA"]                   # 320x240, 480x320, 640x480
-
-
-class CameraSettings(BaseModel):
-    resolution: str = "SVGA"
-    jpeg_quality: int = Field(10, ge=8, le=40)        # makin kecil makin bagus (dan makin besar file)
-    brightness: int = Field(0, ge=-2, le=2)
-    contrast: int = Field(0, ge=-2, le=2)
-    saturation: int = Field(0, ge=-2, le=2)
-    ae_level: int = Field(0, ge=-2, le=2)             # koreksi eksposur otomatis
-    awb: bool = True                                  # white balance otomatis
-    hmirror: bool = False
-    vflip: bool = False
-    flash_mode: str = "capture"                       # off | capture (menyala saat memotret) | on (selalu)
-    flash_intensity: int = Field(128, ge=0, le=255)   # PWM GPIO4
-    live_resolution: str = "QVGA"                     # resolusi live view; kecil agar lancar lewat hotspot
-
-    @field_validator("resolution")
-    @classmethod
-    def _res(cls, v):
-        if v not in RESOLUTIONS:
-            raise ValueError(f"resolusi harus salah satu dari {RESOLUTIONS}")
-        return v
-
-    @field_validator("live_resolution")
-    @classmethod
-    def _live_res(cls, v):
-        if v not in LIVE_RESOLUTIONS:
-            raise ValueError(f"resolusi live harus salah satu dari {LIVE_RESOLUTIONS}")
-        return v
-
-    @field_validator("flash_mode")
-    @classmethod
-    def _flash(cls, v):
-        if v not in ("off", "capture", "on"):
-            raise ValueError("flash_mode harus off, capture, atau on")
-        return v
-
-
-def load_settings() -> dict[str, dict]:
-    try:
-        with open(SETTINGS_PATH) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-DEVICE_SETTINGS: dict[str, dict] = load_settings()   # {device_id: {"version": n, ...CameraSettings}}
-
-
-def settings_for(device_id: str) -> dict:
-    # Isi field yang belum ada di file lama (mis. live_resolution) dengan default
-    return {"version": 1, **CameraSettings().model_dump(), **DEVICE_SETTINGS.get(device_id, {})}
-
-
-def device_reply(dev: dict, device_id: str, settings_version: int | None) -> dict:
-    """Balasan untuk ESP32 (poll maupun kirim frame live): perintah foto, status live, pengaturan."""
-    dev["applied_version"] = settings_version
-    req = dev["capture_requested_at"]
-    capture = req is not None and time.time() - req < CAPTURE_TIMEOUT_SEC
-    dev["capture_requested_at"] = None
-    return {"capture": capture, "live": time.time() < dev["live_until"],
-            "settings": settings_for(device_id)}
-
-
-@app.get("/api/device/poll", dependencies=[Depends(require_key)])
-def device_poll(request: Request, x_device_id: str = Header("unknown"),
-                x_settings_version: int | None = Header(None)):
-    """Dipanggil ESP32 tiap ~1,5 detik. Mengembalikan capture=true jika dashboard meminta foto,
-    live=true jika ada yang menonton live view, beserta pengaturan kamera terbaru
-    (ESP32 menerapkannya jika versinya berubah)."""
-    dev = touch_device(x_device_id, request.client.host if request.client else None)
-    return device_reply(dev, x_device_id, x_settings_version)
-
-
-@app.post("/api/device/frame", dependencies=[Depends(require_key)])
-async def device_frame(request: Request, x_device_id: str = Header("unknown"),
-                       x_settings_version: int | None = Header(None)):
-    """Dipanggil ESP32 terus-menerus selama live: body = JPEG kecil. Frame hanya disimpan
-    di memori (tidak dianalisis model). Balasannya sama dengan /api/device/poll."""
-    data = await read_limited(request)
-    dev = touch_device(x_device_id, request.client.host if request.client else None)
-    if data[:2] == b"\xff\xd8":   # tanda awal JPEG
-        dev["frame"] = data
-        dev["frame_seq"] += 1
-        dev["frame_ts"] = time.time()
-    return device_reply(dev, x_device_id, x_settings_version)
-
-
-@app.get("/api/devices/{device_id}/stream", dependencies=[Depends(require_key)])
-async def device_stream(device_id: str, request: Request):
-    """Live view MJPEG untuk <img src>. Selama koneksi ini terbuka, ESP32 diminta mengirim frame;
-    begitu semua penonton menutup halaman, ESP32 kembali ke mode polling dalam ~LIVE_TTL_SEC."""
-    dev = DEVICES.get(device_id)
-    if not dev:
-        raise HTTPException(404, f"Perangkat {device_id} belum pernah terhubung.")
-
-    async def frames():
-        seq = dev["frame_seq"]   # jangan kirim frame lama dari sesi live sebelumnya
-        while not await request.is_disconnected():
-            dev["live_until"] = time.time() + LIVE_TTL_SEC
-            if dev["frame_seq"] != seq and dev["frame"]:
-                seq, frame = dev["frame_seq"], dev["frame"]
-                yield (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
-                       + str(len(frame)).encode() + b"\r\n\r\n" + frame + b"\r\n")
-            await asyncio.sleep(0.05)
-
-    return StreamingResponse(frames(), media_type="multipart/x-mixed-replace; boundary=frame",
-                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
-
-
-@app.get("/api/devices/{device_id}/settings", dependencies=[Depends(require_key)])
-def get_device_settings(device_id: str):
-    return settings_for(device_id)
-
-
-@app.put("/api/devices/{device_id}/settings", dependencies=[Depends(require_key)])
-def put_device_settings(device_id: str, body: CameraSettings):
-    version = settings_for(device_id)["version"] + 1
-    DEVICE_SETTINGS[device_id] = {"version": version, **body.model_dump()}
-    tmp = SETTINGS_PATH + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(DEVICE_SETTINGS, f, indent=2)
-    os.replace(tmp, SETTINGS_PATH)
-    return DEVICE_SETTINGS[device_id]
-
-
-@app.post("/api/devices/{device_id}/capture", dependencies=[Depends(require_key)])
-def request_capture(device_id: str):
-    dev = DEVICES.get(device_id)
-    if not dev or time.time() - dev["last_seen"] > DEVICE_ONLINE_SEC:
-        raise HTTPException(409, f"Perangkat {device_id} sedang offline.")
-    dev["capture_requested_at"] = time.time()
-    return {"ok": True}
-
-
-@app.get("/api/devices", dependencies=[Depends(require_key)])
-def list_devices():
-    now = time.time()
-    with db() as conn:
-        out = []
-        for device_id, dev in DEVICES.items():
-            row = conn.execute("SELECT * FROM results WHERE device=? ORDER BY ts DESC LIMIT 1",
-                               (device_id,)).fetchone()
-            req = dev["capture_requested_at"]
-            out.append({
-                "id": device_id,
-                "ip": dev["ip"],
-                "last_seen": dev["last_seen"],
-                "online": now - dev["last_seen"] <= DEVICE_ONLINE_SEC,
-                "capture_pending": req is not None and now - req < CAPTURE_TIMEOUT_SEC,
-                "live": now < dev["live_until"],
-                "frame_ts": dev["frame_ts"],
-                "settings_version": settings_for(device_id)["version"],
-                "applied_version": dev.get("applied_version"),
-                "latest": row_to_dict(row) if row else None,
-            })
-    return sorted(out, key=lambda d: d["last_seen"], reverse=True)
-
-
-@app.post("/api/predict", dependencies=[Depends(require_key)])
-async def predict_raw(request: Request, x_device_id: str = Header("unknown")):
-    """Untuk ESP32: body = bytes JPEG mentah."""
-    data = await read_limited(request)
-    touch_device(x_device_id, request.client.host if request.client else None)
-    full = await run_in_threadpool(run_inference, data, x_device_id, "esp32")
-    return {
-        "id": full["id"],
-        "grade": full["grade"],
-        "label": full["label"],
-        "confidence": full["confidence"],
-        "referable": full["referable"],
-        "p_referable": full["p_referable"],
-        "quality_ok": full["quality"]["ok"],
-    }
-
-
-@app.post("/api/upload", dependencies=[Depends(require_key)])
+@app.post("/api/upload", dependencies=[ADMIN])
 async def predict_upload(file: UploadFile = File(...)):
-    """Untuk dashboard: upload manual foto fundus."""
+    """Uji cepat satu foto tanpa pemeriksaan."""
     data = await file.read()
     if len(data) > MAX_BYTES:
         raise HTTPException(413, "Ukuran file lebih dari 10 MB.")
     return await run_in_threadpool(run_inference, data, "dashboard", "upload")
 
 
-class Login(BaseModel):
-    key: str
-
-
-@app.post("/api/login")
-def login(body: Login, response: Response):
-    require_key(body.key, None)
-    response.set_cookie(COOKIE_NAME, body.key, httponly=True, samesite="strict",
-                        max_age=7 * 24 * 3600)
-    return {"ok": True}
-
-
-@app.get("/api/results", dependencies=[Depends(require_key)])
+@app.get("/api/results", dependencies=[ADMIN])
 def results(limit: int = Query(100, ge=1, le=500)):
     with db() as conn:
         rows = conn.execute("SELECT * FROM results ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
     return [row_to_dict(r) for r in rows]
 
 
-@app.delete("/api/results")
-def clear_results(dependencies=[Depends(require_key)]):
+@app.delete("/api/results", dependencies=[ADMIN])
+def clear_results():
+    """Hapus riwayat uji lab. Foto yang menjadi bagian pemeriksaan pasien tidak ikut terhapus."""
     with db() as conn:
-        conn.execute("DELETE FROM results")
+        purge_results(conn, "screening_id IS NULL")
     return {"ok": True, "message": "Riwayat pengujian berhasil dibersihkan."}
 
 
-@app.get("/api/stats", dependencies=[Depends(require_key)])
+@app.get("/api/stats", dependencies=[ADMIN])
 def stats():
     with db() as conn:
         total = conn.execute("SELECT COUNT(*) FROM results").fetchone()[0]
         referable = conn.execute("SELECT COUNT(*) FROM results WHERE referable=1").fetchone()[0]
         per_grade = dict(conn.execute("SELECT grade, COUNT(*) FROM results GROUP BY grade").fetchall())
-        devices = [r[0] for r in conn.execute(
+        device_ids = [r[0] for r in conn.execute(
             "SELECT device FROM results GROUP BY device ORDER BY MAX(ts) DESC").fetchall()]
     return {
         "total": total,
         "referable": referable,
         "per_grade": [per_grade.get(g, 0) for g in range(len(LABELS))],
-        "devices": devices,
+        "devices": device_ids,
         "labels": LABELS,
         "model": META.get("model"),
         "val_kappa": (META.get("val_metrics") or {}).get("kappa"),
         "test_kappa": (META.get("test_metrics") or {}).get("kappa"),
         "ref_prob_threshold": REF_PROB,
-        "auth": bool(API_KEY),
+        "auth": True,
     }
 
 
-@app.get("/images/{name}", dependencies=[Depends(require_key)])
+# --- File gambar & aplikasi web ---
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "model": META.get("model"),
+        "img_size": MODEL_IMG_SIZE,
+        "labels": LABELS,
+        "referable_threshold": REF_PROB,
+    }
+
+
+@app.get("/images/{name}", dependencies=[Depends(current_user)])
 def image(name: str):
-    if not re.fullmatch(r"[0-9a-f]{12}\.(jpg|png)", name):
+    if not re.fullmatch(r"[0-9a-f]{12}(_prep|_heat)?\.(jpg|png)", name):
         raise HTTPException(404)
     path = os.path.join(IMG_DIR, name)
     if not os.path.isfile(path):
         raise HTTPException(404)
-    return FileResponse(path)
+    return FileResponse(path, headers={"Cache-Control": "private, max-age=86400"})
 
 
-@app.get("/")
-def dashboard():
-    return FileResponse(os.path.join(BASE, "static", "dashboard.html"))
+@app.get("/lab", dependencies=[ADMIN])
+def lab_dashboard():
+    """Dasbor lama untuk pengujian model (benchmark, batch ZIP, ambang). Hanya admin."""
+    return FileResponse(os.path.join(BASE, "static", "lab.html"))
+
+
+WEB_DIST = os.getenv("WEB_DIST", os.path.join(BASE, "static", "app"))
+if os.path.isdir(os.path.join(WEB_DIST, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(WEB_DIST, "assets")), name="assets")
+
+
+@app.get("/{path:path}", include_in_schema=False)
+def web_app(path: str):
+    """Aplikasi web (SPA). File statis di root build dilayani langsung, sisanya ke index.html."""
+    if path.startswith(("api/", "images/")):
+        raise HTTPException(404)
+    candidate = os.path.normpath(os.path.join(WEB_DIST, path))
+    if path and candidate.startswith(WEB_DIST + os.sep) and os.path.isfile(candidate):
+        return FileResponse(candidate)
+    index = os.path.join(WEB_DIST, "index.html")
+    if not os.path.isfile(index):
+        raise HTTPException(503, "Aplikasi web belum di-build. Jalankan: cd web && npm install && npm run build")
+    return FileResponse(index, headers={"Cache-Control": "no-cache"})

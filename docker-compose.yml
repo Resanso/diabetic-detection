@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   diabetic-detection:
     build:
@@ -8,13 +6,21 @@ services:
     container_name: diabetic-detection-app
     restart: unless-stopped
     ports:
+      # Aplikasi web dilayani lewat nginx (HTTPS). Port ini tetap terbuka untuk ESP32-CAM yang mengirim HTTP biasa.
       - "8000:8000"
     environment:
       - PORT=8000
-      - API_KEY=               # Isi dengan password acak jika ingin mengaktifkan autentikasi
-      - REF_PROB=0.40          # Ambang probabilitas rujukan (default 0.40)
+      - REF_PROB=${REF_PROB:-}                      # ambang rujukan; kosong = pakai ambang hasil training di metadata.json
+      - DEVICE_KEY=${DEVICE_KEY:-}                  # kunci ESP32 (header X-API-Key). Wajib diisi di produksi.
+      - COOKIE_SECURE=${COOKIE_SECURE:-0}           # 1 jika diakses lewat HTTPS
+      - SHOW_AI_TO_NURSE=${SHOW_AI_TO_NURSE:-0}     # 1 = perawat juga melihat perkiraan AI
+      - CLINIC_TZ=${CLINIC_TZ:-Asia/Jakarta}        # zona waktu jadwal dan antrean
+      - BOOK_DAYS=${BOOK_DAYS:-14}                  # booking paling jauh N hari ke depan
+      - BPJS_CONS_ID=${BPJS_CONS_ID:-}              # kredensial VClaim BPJS; kosong = cek BPJS nonaktif
+      - BPJS_SECRET=${BPJS_SECRET:-}
+      - BPJS_USER_KEY=${BPJS_USER_KEY:-}
+      - BPJS_BASE_URL=${BPJS_BASE_URL:-https://apijkn-dev.bpjs-kesehatan.go.id/vclaim-rest-dev}
     volumes:
-      # Simpan data pasien, riwayat SQLite, dan gambar agar tidak hilang saat container direstart
+      # Data pasien, SQLite, dan foto tetap ada walau container dibuat ulang
       - ./server/data:/app/data
-      # Hubungkan folder model jika ingin mengganti bobot ONNX tanpa rebuild container
       - ./server/model:/app/model
