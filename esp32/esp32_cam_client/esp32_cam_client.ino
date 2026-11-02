@@ -5,6 +5,9 @@
  *       "Ambil Foto" di dashboard (ESP32 menanyakan /api/device/poll tiap 1,5 detik)
  *       -> ambil foto JPEG -> POST ke /api/predict -> tampilkan hasil
  *
+ * Live view: selama dashboard menonton (poll membalas live=true), ESP32 mengirim
+ *       frame kecil terus-menerus ke /api/device/frame, yang balasannya sama dengan poll.
+ *
  * Library: ArduinoJson v7 (Library Manager). Board: "AI Thinker ESP32-CAM".
  * Partition scheme: "Huge APP (3MB No OTA)".
  */
@@ -22,6 +25,7 @@ const char* API_KEY     = SECRET_API_KEY;   // isi jika server memakai env API_K
 const char* DEVICE_ID   = "esp32-cam-01";
 
 #define POLL_INTERVAL_MS 1500   // jeda menanyakan perintah foto ke server
+#define LIVE_JPEG_QUALITY 14    // kompresi frame live (lebih kasar = lebih lancar)
 
 #define BUTTON_PIN   13   // tombol ke GND
 #define LED_PIN      33   // LED merah onboard (aktif LOW)
@@ -32,6 +36,10 @@ const char* DEVICE_ID   = "esp32-cam-01";
 int    settingsVersion = 0;
 String flashMode       = "capture";   // off | capture | on
 int    flashIntensity  = 128;         // 0-255
+framesize_t captureFs  = FRAMESIZE_SVGA;   // resolusi foto untuk analisis
+int    captureQuality  = 10;
+framesize_t liveFs     = FRAMESIZE_QVGA;   // resolusi live view
+bool   liveMode        = false;
 
 // Pin kamera AI-Thinker
 #define PWDN_GPIO_NUM 32
@@ -92,7 +100,8 @@ bool initCamera() {
     return false;
   }
   sensor_t* s = esp_camera_sensor_get();
-  s->set_framesize(s, psramFound() ? FRAMESIZE_SVGA : FRAMESIZE_VGA);
+  captureFs = psramFound() ? FRAMESIZE_SVGA : FRAMESIZE_VGA;
+  s->set_framesize(s, captureFs);
   return true;
 }
 
@@ -109,13 +118,34 @@ framesize_t parseFramesize(const char* name) {
   return FRAMESIZE_SVGA;
 }
 
+framesize_t parseLiveFramesize(const char* name) {
+  if (!strcmp(name, "VGA"))  return FRAMESIZE_VGA;
+  if (!strcmp(name, "HVGA")) return FRAMESIZE_HVGA;
+  return FRAMESIZE_QVGA;
+}
+
+// Pasang resolusi & kompresi sesuai mode (live: kecil dan cepat, foto: sesuai pengaturan).
+void useCameraMode(bool live) {
+  sensor_t* s = esp_camera_sensor_get();
+  s->set_framesize(s, live ? liveFs : captureFs);
+  s->set_quality(s, live ? LIVE_JPEG_QUALITY : captureQuality);
+}
+
+void setLiveMode(bool on) {
+  if (on == liveMode) return;
+  liveMode = on;
+  useCameraMode(on);
+  Serial.println(on ? "Live view dimulai" : "Live view berhenti");
+}
+
 // Terapkan pengaturan kamera & flash dari server (dipanggil saat versinya berubah).
 void applySettings(JsonObject cfg) {
   sensor_t* s = esp_camera_sensor_get();
-  framesize_t fs = parseFramesize(cfg["resolution"] | "SVGA");
-  if (!psramFound() && fs > FRAMESIZE_VGA) fs = FRAMESIZE_VGA;   // tanpa PSRAM buffer tidak cukup
-  s->set_framesize(s, fs);
-  s->set_quality(s, cfg["jpeg_quality"] | 10);
+  captureFs = parseFramesize(cfg["resolution"] | "SVGA");
+  if (!psramFound() && captureFs > FRAMESIZE_VGA) captureFs = FRAMESIZE_VGA;   // tanpa PSRAM buffer tidak cukup
+  captureQuality = cfg["jpeg_quality"] | 10;
+  liveFs = parseLiveFramesize(cfg["live_resolution"] | "QVGA");
+  useCameraMode(liveMode);
   s->set_brightness(s, cfg["brightness"] | 0);
   s->set_contrast(s, cfg["contrast"] | 0);
   s->set_saturation(s, cfg["saturation"] | 0);
@@ -155,9 +185,12 @@ void captureAndSend() {
     delay(150);
   }
 
+  // Saat live, kamera sedang di resolusi kecil: pindah ke resolusi foto dulu
+  if (liveMode) useCameraMode(false);
+
   // Buang frame lama (diambil sebelum flash/perubahan setelan) agar yang dikirim foto terbaru
   camera_fb_t* fb;
-  for (int i = 0; i < (flashForShot ? 3 : 1); i++) {
+  for (int i = 0; i < (flashForShot || liveMode ? 3 : 1); i++) {
     fb = esp_camera_fb_get();
     if (fb) esp_camera_fb_return(fb);
   }
@@ -165,6 +198,7 @@ void captureAndSend() {
   digitalWrite(LED_PIN, LOW);
   fb = esp_camera_fb_get();
   if (flashForShot) setFlash(0);
+  if (liveMode) useCameraMode(true);
   if (!fb) {
     Serial.println("Gagal mengambil foto");
     digitalWrite(LED_PIN, HIGH);
@@ -231,11 +265,49 @@ void setup() {
   Serial.println("Siap. Tekan tombol, ketik 'c' di Serial Monitor, atau klik Ambil Foto di dashboard.");
 }
 
-// URL poll diturunkan dari SERVER_URL: .../api/predict -> .../api/device/poll
-String pollUrl() {
+// URL lain diturunkan dari SERVER_URL: .../api/predict -> .../api/device/poll, /api/device/frame
+String deviceUrl(const char* path) {
   String url = SERVER_URL;
-  url.replace("/api/predict", "/api/device/poll");
+  url.replace("/api/predict", path);
   return url;
+}
+
+// Balasan poll/frame: {capture, live, settings}. Mengembalikan true jika diminta memotret.
+bool handleDeviceReply(const String& body) {
+  JsonDocument doc;
+  if (deserializeJson(doc, body)) return false;
+  JsonObject cfg = doc["settings"];
+  if (!cfg.isNull() && (int)(cfg["version"] | 0) != settingsVersion) applySettings(cfg);
+  setLiveMode(doc["live"] | false);
+  return doc["capture"] | false;
+}
+
+// Satu HTTPClient dengan keep-alive untuk frame live agar tidak membuka koneksi baru tiap frame
+HTTPClient liveHttp;
+
+// Kirim satu frame live ke server. Balasannya sama dengan poll.
+bool sendLiveFrame() {
+  if (WiFi.status() != WL_CONNECTED) { setLiveMode(false); return false; }
+  camera_fb_t* fb = esp_camera_fb_get();
+  if (!fb) return false;
+  liveHttp.setReuse(true);
+  liveHttp.begin(deviceUrl("/api/device/frame"));
+  liveHttp.setTimeout(5000);
+  liveHttp.addHeader("Content-Type", "image/jpeg");
+  liveHttp.addHeader("X-Device-Id", DEVICE_ID);
+  if (strlen(API_KEY) > 0) liveHttp.addHeader("X-API-Key", API_KEY);
+  liveHttp.addHeader("X-Settings-Version", String(settingsVersion));
+  int code = liveHttp.POST(fb->buf, fb->len);
+  esp_camera_fb_return(fb);
+  bool capture = false;
+  if (code == 200) {
+    capture = handleDeviceReply(liveHttp.getString());
+  } else {
+    Serial.printf("Frame live gagal: %d\n", code);
+    setLiveMode(false);   // kembali ke polling; poll berikutnya akan menyalakan lagi jika masih ditonton
+  }
+  liveHttp.end();
+  return capture;
 }
 
 // Tanya server apakah dashboard meminta foto, sekaligus menandai perangkat online
@@ -243,21 +315,13 @@ String pollUrl() {
 bool captureRequested() {
   if (WiFi.status() != WL_CONNECTED) return false;
   HTTPClient http;
-  http.begin(pollUrl());
+  http.begin(deviceUrl("/api/device/poll"));
   http.setTimeout(3000);
   http.addHeader("X-Device-Id", DEVICE_ID);
   if (strlen(API_KEY) > 0) http.addHeader("X-API-Key", API_KEY);
   http.addHeader("X-Settings-Version", String(settingsVersion));
   int code = http.GET();
-  bool capture = false;
-  if (code == 200) {
-    JsonDocument doc;
-    if (!deserializeJson(doc, http.getString())) {
-      JsonObject cfg = doc["settings"];
-      if (!cfg.isNull() && (int)(cfg["version"] | 0) != settingsVersion) applySettings(cfg);
-      capture = doc["capture"] | false;
-    }
-  }
+  bool capture = code == 200 && handleDeviceReply(http.getString());
   http.end();
   return capture;
 }
@@ -268,11 +332,14 @@ void loop() {
   bool pressed = digitalRead(BUTTON_PIN) == LOW && millis() - lastPress > 1000;
   bool serialCmd = Serial.available() && Serial.read() == 'c';
   bool webCmd = false;
-  if (millis() - lastPoll > POLL_INTERVAL_MS) {
+  if (liveMode) {
+    webCmd = sendLiveFrame();   // secepat koneksi mengizinkan
+    lastPoll = millis();
+  } else if (millis() - lastPoll > POLL_INTERVAL_MS) {
     lastPoll = millis();
     webCmd = captureRequested();
-    if (webCmd) Serial.println("Perintah foto dari dashboard");
   }
+  if (webCmd) Serial.println("Perintah foto dari dashboard");
   if (pressed || serialCmd || webCmd) {
     lastPress = millis();
     captureAndSend();

@@ -7,6 +7,7 @@ Server skrining Diabetic Retinopathy (DR) terintegrasi sistem pengujian akurasi:
 5. Endpoint Penyetelan Ambang Batas Sensitivitas Real-Time (/api/benchmark/tune-threshold)
 6. Riwayat, Statistik, dan Dashboard Web interaktif (/ & /api/results)
 """
+import asyncio
 import io
 import json
 import os
@@ -25,7 +26,7 @@ import numpy as np
 import onnxruntime as ort
 from fastapi import Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from preprocess import (
@@ -587,10 +588,12 @@ async def evaluate_batch(file: UploadFile = File(...), threshold: float = Form(N
 DEVICES: dict[str, dict] = {}
 DEVICE_ONLINE_SEC = 10        # dianggap offline jika tidak polling selama ini
 CAPTURE_TIMEOUT_SEC = 30      # perintah foto yang tidak diambil dianggap kedaluwarsa
+LIVE_TTL_SEC = 5              # live view berhenti sendiri jika tidak ada penonton selama ini
 
 
 def touch_device(device_id: str, ip: str | None) -> dict:
-    dev = DEVICES.setdefault(device_id, {"capture_requested_at": None, "applied_version": None})
+    dev = DEVICES.setdefault(device_id, {"capture_requested_at": None, "applied_version": None,
+                                         "live_until": 0.0, "frame": None, "frame_seq": 0, "frame_ts": None})
     dev["last_seen"] = time.time()
     dev["ip"] = ip
     return dev
@@ -599,6 +602,7 @@ def touch_device(device_id: str, ip: str | None) -> dict:
 # Pengaturan kamera per perangkat. Disimpan di file agar tetap ada setelah server restart.
 SETTINGS_PATH = os.path.join(DATA_DIR, "device_settings.json")
 RESOLUTIONS = ["VGA", "SVGA", "XGA", "HD", "SXGA", "UXGA"]   # 640x480 ... 1600x1200
+LIVE_RESOLUTIONS = ["QVGA", "HVGA", "VGA"]                   # 320x240, 480x320, 640x480
 
 
 class CameraSettings(BaseModel):
@@ -613,12 +617,20 @@ class CameraSettings(BaseModel):
     vflip: bool = False
     flash_mode: str = "capture"                       # off | capture (menyala saat memotret) | on (selalu)
     flash_intensity: int = Field(128, ge=0, le=255)   # PWM GPIO4
+    live_resolution: str = "QVGA"                     # resolusi live view; kecil agar lancar lewat hotspot
 
     @field_validator("resolution")
     @classmethod
     def _res(cls, v):
         if v not in RESOLUTIONS:
             raise ValueError(f"resolusi harus salah satu dari {RESOLUTIONS}")
+        return v
+
+    @field_validator("live_resolution")
+    @classmethod
+    def _live_res(cls, v):
+        if v not in LIVE_RESOLUTIONS:
+            raise ValueError(f"resolusi live harus salah satu dari {LIVE_RESOLUTIONS}")
         return v
 
     @field_validator("flash_mode")
@@ -641,23 +653,64 @@ DEVICE_SETTINGS: dict[str, dict] = load_settings()   # {device_id: {"version": n
 
 
 def settings_for(device_id: str) -> dict:
-    s = DEVICE_SETTINGS.get(device_id)
-    if s is None:
-        s = {"version": 1, **CameraSettings().model_dump()}
-    return s
+    # Isi field yang belum ada di file lama (mis. live_resolution) dengan default
+    return {"version": 1, **CameraSettings().model_dump(), **DEVICE_SETTINGS.get(device_id, {})}
+
+
+def device_reply(dev: dict, device_id: str, settings_version: int | None) -> dict:
+    """Balasan untuk ESP32 (poll maupun kirim frame live): perintah foto, status live, pengaturan."""
+    dev["applied_version"] = settings_version
+    req = dev["capture_requested_at"]
+    capture = req is not None and time.time() - req < CAPTURE_TIMEOUT_SEC
+    dev["capture_requested_at"] = None
+    return {"capture": capture, "live": time.time() < dev["live_until"],
+            "settings": settings_for(device_id)}
 
 
 @app.get("/api/device/poll", dependencies=[Depends(require_key)])
 def device_poll(request: Request, x_device_id: str = Header("unknown"),
                 x_settings_version: int | None = Header(None)):
     """Dipanggil ESP32 tiap ~1,5 detik. Mengembalikan capture=true jika dashboard meminta foto,
-    beserta pengaturan kamera terbaru (ESP32 menerapkannya jika versinya berubah)."""
+    live=true jika ada yang menonton live view, beserta pengaturan kamera terbaru
+    (ESP32 menerapkannya jika versinya berubah)."""
     dev = touch_device(x_device_id, request.client.host if request.client else None)
-    dev["applied_version"] = x_settings_version
-    req = dev["capture_requested_at"]
-    capture = req is not None and time.time() - req < CAPTURE_TIMEOUT_SEC
-    dev["capture_requested_at"] = None
-    return {"capture": capture, "settings": settings_for(x_device_id)}
+    return device_reply(dev, x_device_id, x_settings_version)
+
+
+@app.post("/api/device/frame", dependencies=[Depends(require_key)])
+async def device_frame(request: Request, x_device_id: str = Header("unknown"),
+                       x_settings_version: int | None = Header(None)):
+    """Dipanggil ESP32 terus-menerus selama live: body = JPEG kecil. Frame hanya disimpan
+    di memori (tidak dianalisis model). Balasannya sama dengan /api/device/poll."""
+    data = await read_limited(request)
+    dev = touch_device(x_device_id, request.client.host if request.client else None)
+    if data[:2] == b"\xff\xd8":   # tanda awal JPEG
+        dev["frame"] = data
+        dev["frame_seq"] += 1
+        dev["frame_ts"] = time.time()
+    return device_reply(dev, x_device_id, x_settings_version)
+
+
+@app.get("/api/devices/{device_id}/stream", dependencies=[Depends(require_key)])
+async def device_stream(device_id: str, request: Request):
+    """Live view MJPEG untuk <img src>. Selama koneksi ini terbuka, ESP32 diminta mengirim frame;
+    begitu semua penonton menutup halaman, ESP32 kembali ke mode polling dalam ~LIVE_TTL_SEC."""
+    dev = DEVICES.get(device_id)
+    if not dev:
+        raise HTTPException(404, f"Perangkat {device_id} belum pernah terhubung.")
+
+    async def frames():
+        seq = dev["frame_seq"]   # jangan kirim frame lama dari sesi live sebelumnya
+        while not await request.is_disconnected():
+            dev["live_until"] = time.time() + LIVE_TTL_SEC
+            if dev["frame_seq"] != seq and dev["frame"]:
+                seq, frame = dev["frame_seq"], dev["frame"]
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                       + str(len(frame)).encode() + b"\r\n\r\n" + frame + b"\r\n")
+            await asyncio.sleep(0.05)
+
+    return StreamingResponse(frames(), media_type="multipart/x-mixed-replace; boundary=frame",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
 
 @app.get("/api/devices/{device_id}/settings", dependencies=[Depends(require_key)])
@@ -700,6 +753,8 @@ def list_devices():
                 "last_seen": dev["last_seen"],
                 "online": now - dev["last_seen"] <= DEVICE_ONLINE_SEC,
                 "capture_pending": req is not None and now - req < CAPTURE_TIMEOUT_SEC,
+                "live": now < dev["live_until"],
+                "frame_ts": dev["frame_ts"],
                 "settings_version": settings_for(device_id)["version"],
                 "applied_version": dev.get("applied_version"),
                 "latest": row_to_dict(row) if row else None,

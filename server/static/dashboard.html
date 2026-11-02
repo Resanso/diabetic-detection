@@ -752,6 +752,10 @@
   }
   @keyframes cam-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .cam-spinner { animation: none; } }
+  .cam-live-badge {
+    position: absolute; top: 10px; left: 10px; padding: 3px 8px; border-radius: var(--radius-sm);
+    background: var(--g3); color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  }
   .cam-actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
   .cam-result { display: grid; gap: 12px; }
   .cam-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }
@@ -1230,9 +1234,11 @@
           </div>
         </div>
         <div class="cam-frame" id="camFrame">
-          <div class="cam-placeholder" id="camPlaceholder">Belum ada foto dari ESP32.<br>Klik "Ambil Foto" atau tekan tombol di perangkat.</div>
+          <div class="cam-placeholder" id="camPlaceholder">Kamera ESP32 belum terhubung.<br>Nyalakan perangkat; tampilan kamera muncul otomatis.</div>
           <img id="camImage" alt="Foto terbaru dari ESP32-CAM" hidden>
-          <div class="cam-overlay" id="camOverlay" hidden><span class="cam-spinner"></span><span>Menunggu foto dari ESP32...</span></div>
+          <img id="camLive" alt="Live view ESP32-CAM" hidden>
+          <span class="cam-live-badge" id="camLiveBadge" hidden>LIVE</span>
+          <div class="cam-overlay" id="camOverlay" hidden><span class="cam-spinner"></span><span id="camOverlayText">Menunggu foto dari ESP32...</span></div>
         </div>
         <div class="cam-actions">
           <button class="btn btn-primary" id="btnCapture" disabled>Ambil Foto</button>
@@ -1275,6 +1281,15 @@
               <option value="UXGA">UXGA · 1600×1200</option>
             </select>
             <span class="cam-hint">Model memakai 224 px; resolusi tinggi membantu fokus &amp; arsip tetapi upload lebih lama.</span>
+          </div>
+          <div class="cam-field">
+            <label for="setLiveResolution">Resolusi live view</label>
+            <select id="setLiveResolution" name="live_resolution">
+              <option value="QVGA">QVGA · 320×240</option>
+              <option value="HVGA">HVGA · 480×320</option>
+              <option value="VGA">VGA · 640×480</option>
+            </select>
+            <span class="cam-hint">Hanya untuk membidik. Makin kecil makin lancar dan hemat kuota hotspot.</span>
           </div>
           <div class="cam-field">
             <label for="setQuality">Kompresi JPEG <output id="outQuality" for="setQuality">10</output></label>
@@ -2059,6 +2074,10 @@
     results: [],
     settingsFor: null,     // perangkat yang pengaturannya sudah dimuat ke form
     settingsDirty: false,  // form diubah tapi belum disimpan
+    live: false,           // tampilan kamera langsung sedang terbuka
+    liveRetryAt: 0,        // jeda sebelum menyambung ulang setelah stream terputus
+    liveBaseline: null,    // frame_ts terakhir sebelum live dimulai, untuk mendeteksi frame baru
+    frameTs: null,         // frame_ts perangkat dari refresh terakhir
   };
 
   function escapeHtml(v) {
@@ -2084,14 +2103,14 @@
     const img = document.getElementById('camImage');
     const ph = document.getElementById('camPlaceholder');
     if (!r) {
-      img.hidden = true; ph.hidden = false;
+      img.hidden = true; ph.hidden = cam.live;
       document.getElementById('camResultTime').textContent = 'Belum ada hasil';
       box.innerHTML = '<p class="cam-placeholder">Hasil analisis foto terbaru akan tampil di sini.</p>';
       return;
     }
     cam.selectedId = r.id;
     if (img.getAttribute('src') !== r.image_url) img.src = r.image_url;
-    img.hidden = false; ph.hidden = true;
+    img.hidden = cam.live; ph.hidden = true;   // saat live, bingkai dipakai live view
     document.getElementById('camResultTime').textContent =
       `${new Date(r.ts * 1000).toLocaleString()} · ${escapeHtml(r.device)}`;
     const q = r.quality || {};
@@ -2143,6 +2162,16 @@
       const dot = document.getElementById('camDot');
       const name = document.getElementById('camName');
       const btn = document.getElementById('btnCapture');
+      // Seperti aplikasi kamera: tampilan langsung menyala selama tab ini terbuka dan perangkat online
+      if (cam.live && (!dev || !dev.online || dev.id !== cam.liveDevice)) {
+        stopLive();
+      } else if (!cam.live && dev && dev.online && cam.timer && Date.now() >= cam.liveRetryAt) {
+        cam.frameTs = dev.frame_ts;
+        startLive();
+      } else if (cam.live && dev.frame_ts && dev.frame_ts !== cam.liveBaseline && cam.waitingSince === null) {
+        document.getElementById('camOverlay').hidden = true;   // frame live pertama sudah masuk
+      }
+      cam.frameTs = dev ? dev.frame_ts : null;
       if (!dev) {
         dot.classList.add('offline');
         name.textContent = 'Belum ada ESP32 terhubung';
@@ -2199,6 +2228,7 @@
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
       cam.waitingSince = Date.now();
+      document.getElementById('camOverlayText').textContent = 'Memotret...';
       document.getElementById('camOverlay').hidden = false;
       setCamMsg('Perintah terkirim. ESP32 akan memotret dalam beberapa detik.');
     } catch (e) {
@@ -2207,20 +2237,60 @@
     }
   });
 
+  // ----- Live view -----
+  // <img> membuka stream MJPEG dari server. Selama stream terbuka, server meminta ESP32
+  // mengirim frame; menutup stream (src dikosongkan) membuat ESP32 kembali polling.
+  function startLive() {
+    if (!cam.device) return;
+    const live = document.getElementById('camLive');
+    cam.live = true;
+    cam.liveDevice = cam.device;
+    cam.liveBaseline = cam.frameTs;
+    live.src = `/api/devices/${encodeURIComponent(cam.device)}/stream?t=${Date.now()}`;
+    live.hidden = false;
+    document.getElementById('camLiveBadge').hidden = false;
+    document.getElementById('camImage').hidden = true;
+    document.getElementById('camPlaceholder').hidden = true;
+    document.getElementById('camOverlayText').textContent = 'Membuka kamera...';
+    document.getElementById('camOverlay').hidden = false;
+  }
+
+  function stopLive() {
+    if (!cam.live) return;
+    const live = document.getElementById('camLive');
+    live.removeAttribute('src');   // menutup koneksi stream
+    live.hidden = true;
+    cam.live = false;
+    document.getElementById('camLiveBadge').hidden = true;
+    if (cam.waitingSince === null) document.getElementById('camOverlay').hidden = true;
+    renderCamResult(cam.results.find(r => r.id === cam.selectedId) || cam.results[0] || null);
+  }
+
+  document.getElementById('camLive').addEventListener('load', () => {
+    if (cam.live && cam.waitingSince === null) document.getElementById('camOverlay').hidden = true;
+  });
+  document.getElementById('camLive').addEventListener('error', () => {
+    if (!cam.live) return;
+    stopLive();
+    cam.liveRetryAt = Date.now() + 5000;   // disambung ulang otomatis oleh refreshCamera
+  });
+
   function startCamera() {
     if (cam.timer) return;
-    refreshCamera();
     cam.timer = setInterval(refreshCamera, 2000);
+    refreshCamera();   // setelah timer diisi, agar kamera langsung menyala
   }
   function stopCamera() {
     clearInterval(cam.timer);
     cam.timer = null;
+    stopLive();
   }
 
   // ----- Pengaturan kamera -----
   const CAM_DEFAULTS = {
     resolution: 'SVGA', jpeg_quality: 10, brightness: 0, contrast: 0, saturation: 0, ae_level: 0,
     awb: true, hmirror: false, vflip: false, flash_mode: 'capture', flash_intensity: 128,
+    live_resolution: 'QVGA',
   };
   const camForm = document.getElementById('camSettingsForm');
 
@@ -2240,6 +2310,7 @@
   function fillCamForm(cfg) {
     const c = { ...CAM_DEFAULTS, ...cfg };
     document.getElementById('setResolution').value = c.resolution;
+    document.getElementById('setLiveResolution').value = c.live_resolution;
     document.getElementById('setQuality').value = c.jpeg_quality;
     document.getElementById('setAe').value = c.ae_level;
     document.getElementById('setBrightness').value = c.brightness;
@@ -2257,6 +2328,7 @@
     const n = id => parseInt(document.getElementById(id).value, 10);
     return {
       resolution: document.getElementById('setResolution').value,
+      live_resolution: document.getElementById('setLiveResolution').value,
       jpeg_quality: n('setQuality'), ae_level: n('setAe'),
       brightness: n('setBrightness'), contrast: n('setContrast'), saturation: n('setSaturation'),
       awb: document.getElementById('setAwb').checked,
