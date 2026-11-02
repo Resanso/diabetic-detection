@@ -1,0 +1,9 @@
+{
+  "name": "Retinova: Skrining Retina",
+  "short_name": "Retinova",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F5F6F8",
+  "theme_color": "#FFFFFF",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

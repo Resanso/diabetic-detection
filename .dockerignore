@@ -12,3 +12,7 @@ esp32/
 .DS_Store
 .idea
 .vscode
+web/node_modules
+server/static/app
+server/data
+server/model

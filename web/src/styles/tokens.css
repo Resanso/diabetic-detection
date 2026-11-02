@@ -1,0 +1,130 @@
+/*
+ * Token desain Retinova. Sumber: docs/BRAND.md bagian 5 sampai 8. Ubah keduanya bersamaan.
+ *
+ * Dua lapis:
+ *  - Primitif (--grafit-*, --kobalt-*) menamai nilai. Tidak dipakai langsung di komponen.
+ *  - Semantik (--bg, --ink, --accent, ...) menamai peran. Hanya lapis ini yang dipakai komponen.
+ * Semua nilai dihitung di OKLCH (hue 266) lalu dikonversi ke hex; kontras tiap pasangan tercatat di BRAND.md.
+ */
+:root {
+  /* Grafit: netral hampir murni, tanpa semburat biru */
+  --grafit-0: #ffffff;
+  --grafit-50: #f5f6f8;
+  --grafit-100: #eeeff2;
+  --grafit-200: #dee0e3;
+  --grafit-300: #bbbec3;
+  --grafit-500: #64686f;
+  --grafit-600: #42454b;
+  --grafit-900: #171a1d;
+
+  --grafit-d-950: #0e0e0f;
+  --grafit-d-900: #161719;
+  --grafit-d-850: #1f2022;
+  --grafit-d-800: #2b2d2f;
+  --grafit-d-700: #424448;
+  --grafit-d-400: #9c9ea3;
+  --grafit-d-200: #c5c7cb;
+  --grafit-d-50: #eff0f2;
+
+  /* Kobalt: satu-satunya aksen */
+  --kobalt-50: #e9f0ff;
+  --kobalt-600: #2347c5;
+  --kobalt-700: #1a38a6;
+  --kobalt-d-soft: #1a2541;
+  --kobalt-d-solid: #3c67e8;
+  --kobalt-d-press: #3259d1;
+  --kobalt-d-text: #96b6fe;
+
+  /* ---- Semantik: tema terang (bawaan) ---- */
+  color-scheme: light;
+  --bg: var(--grafit-50);
+  --surface: var(--grafit-0);
+  --surface-2: var(--grafit-100);
+  --line: var(--grafit-200);
+  --line-strong: var(--grafit-300);
+  --ink: var(--grafit-900);
+  --ink-2: var(--grafit-600);
+  --ink-3: var(--grafit-500);
+
+  --accent: var(--kobalt-600);        /* isian: tombol utama, indikator aktif, fokus */
+  --accent-press: var(--kobalt-700);
+  --accent-soft: var(--kobalt-50);    /* latar pilihan aktif, info */
+  --accent-text: var(--kobalt-600);   /* teks/ikon aksen di atas surface atau accent-soft */
+  --on-accent: #ffffff;
+
+  --danger: #a8231a;                  /* teks galat */
+  --danger-soft: #fce3df;
+  --danger-solid: #a8231a;            /* isian: chip "Rujuk segera", lencana */
+  --on-danger: #ffffff;
+
+  /* Derajat keparahan: teks / latar */
+  --g0: #17663f;  --g0-bg: #e3f2e9;
+  --g1: #7a5a00;  --g1-bg: #faf0cc;
+  --g2: #a3470b;  --g2-bg: #fce8d6;
+  --g3: #a8231a;  --g3-bg: #fce3df;
+  --g4: #6e0f1e;  --g4-bg: #f5d8dd;
+
+  --viewer-bg: #0b0b0c;
+  --shadow-float: 0 8px 24px rgb(23 26 29 / 0.12), 0 1px 3px rgb(23 26 29 / 0.08);
+
+  /* Tipografi */
+  --font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+
+  /* Ruang */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s8: 32px; --s10: 40px; --s14: 56px;
+  --gutter: 16px;
+
+  /* Bentuk */
+  --r-control: 10px;
+  --r-card: 14px;
+  --r-sheet: 20px;
+
+  /* Gerak */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --t-press: 100ms;
+  --t-state: 160ms;
+  --t-space: 240ms;
+
+  --topbar-h: 56px;
+  --nav-h: 64px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Tema gelap. Atribut data-theme diatur oleh src/lib/theme.ts (dan skrip kecil di index.html sebelum render). */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: var(--grafit-d-950);
+  --surface: var(--grafit-d-900);
+  --surface-2: var(--grafit-d-850);
+  --line: var(--grafit-d-800);
+  --line-strong: var(--grafit-d-700);
+  --ink: var(--grafit-d-50);
+  --ink-2: var(--grafit-d-200);
+  --ink-3: var(--grafit-d-400);
+
+  /* Aksen tetap pekat dengan teks putih; versi terang hanya untuk teks */
+  --accent: var(--kobalt-d-solid);
+  --accent-press: var(--kobalt-d-press);
+  --accent-soft: var(--kobalt-d-soft);
+  --accent-text: var(--kobalt-d-text);
+  --on-accent: #ffffff;
+
+  --danger: #ffa99b;
+  --danger-soft: #3b1c18;
+  --danger-solid: #c93029;
+  --on-danger: #ffffff;
+
+  --g0: #8cdd9e;  --g0-bg: #122d19;
+  --g1: #e2c65b;  --g1-bg: #2e2605;
+  --g2: #ffb474;  --g2-bg: #38200a;
+  --g3: #ffa99b;  --g3-bg: #3b1c18;
+  --g4: #ffa6b8;  --g4-bg: #3b1b22;
+
+  --shadow-float: 0 8px 24px rgb(0 0 0 / 0.55), 0 0 0 1px var(--line);
+}
+
+@media (min-width: 768px) {
+  :root { --gutter: 24px; }
+}

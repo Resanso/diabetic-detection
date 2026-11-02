@@ -754,6 +754,33 @@
   @media (prefers-reduced-motion: reduce) { .cam-spinner { animation: none; } }
   .cam-actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
   .cam-result { display: grid; gap: 12px; }
+  .perf-switch { display: inline-flex; background: var(--bg-card-subtle); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 3px; gap: 2px; }
+  .perf-switch button { border: 0; background: transparent; color: var(--text-secondary); font: inherit; font-size: 12px; font-weight: 600; padding: 7px 12px; border-radius: var(--radius-sm); cursor: pointer; touch-action: manipulation; }
+  .perf-switch button[aria-selected="true"] { background: var(--accent); color: #fff; }
+  .perf-note { font-size: 12px; color: var(--text-secondary); margin-top: 10px; line-height: 1.5; }
+  .perf-note--warn { color: #FCD34D; }
+  .perf-section { font-size: 13px; font-weight: 700; color: var(--text-secondary); margin: 0 0 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .perf-ref-counts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 14px; font-size: 12px; text-align: center; }
+  .perf-ref-counts div { background: var(--bg-card-subtle); border-radius: var(--radius-sm); padding: 8px 4px; color: var(--text-secondary); }
+  .perf-ref-counts b { display: block; font-size: 18px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  .perf-legend { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+  .perf-legend li + li { margin-top: 4px; }
+  .qc { background: var(--bg-card); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 12px; margin-top: 12px; }
+  .qc__head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .qc__head b { color: var(--text-primary); font-size: 13px; }
+  .qc table { width: 100%; border-collapse: collapse; }
+  .qc th { text-align: left; font-weight: 600; color: var(--text-muted); padding: 4px 6px 6px 0; border-bottom: 1px solid var(--border); }
+  .qc td { padding: 5px 6px 5px 0; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); vertical-align: top; }
+  .qc td.num { font-variant-numeric: tabular-nums; color: var(--text-primary); text-align: right; }
+  .qc td.st { width: 22px; text-align: center; font-weight: 700; }
+  .qc tr[data-pass="false"] td { color: #FCA5A5; }
+  .qc tr[data-pass="false"] td.st { color: var(--g3); }
+  .qc tr[data-pass="true"] td.st { color: var(--g0); }
+  .qc tr[data-pass="loose"] td.st { color: var(--g1); }
+  .qc__issues { margin-top: 8px; color: #FCD34D; }
+  .badge-qc-ok { background: var(--g0-bg); color: #34D399; }
+  .badge-qc-warn { background: var(--g1-bg); color: #FBBF24; }
+  .badge-qc-bad { background: rgba(239, 68, 68, 0.2); color: #F87171; }
   .cam-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }
   .cam-row span:first-child { color: var(--text-secondary); }
   .cam-warn {
@@ -843,6 +870,12 @@
           <path d="M18 20V10M12 20V4M6 20v-6"/>
         </svg>
         Uji Akurasi Benchmark
+      </button>
+      <button class="tab-btn" data-tab="tab-performance" role="tab">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/>
+        </svg>
+        Performa Model
       </button>
       <button class="tab-btn" data-tab="tab-batch" role="tab">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -993,17 +1026,76 @@
 
           <!-- Quality Metrics -->
           <div style="background: var(--bg-card); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-            <span>Kecerahan: <b id="valBrightness" style="color: var(--text-primary);">-</b></span>
-            <span>Ketajaman: <b id="valSharpness" style="color: var(--text-primary);">-</b></span>
             <span>Peluang Rujukan: <b id="valPRef" style="color: var(--text-primary);">-</b></span>
             <span>Status Mutu: <b id="valQualityOk" style="color: var(--text-primary);">-</b></span>
           </div>
+          <div id="qualityDetail"></div>
         </div>
       </div>
     </div>
   </div>
 
   <!-- TAB 2: UJI AKURASI BENCHMARK -->
+  <div id="tab-performance" class="tab-content hidden">
+    <div class="card" style="margin-bottom: 20px;">
+      <div class="card-header" style="flex-wrap: wrap; gap: 12px;">
+        <div>
+          <h3 class="card-title" id="perfModelName">Performa model</h3>
+          <p class="card-subtitle" id="perfModelSub">Memuat informasi model...</p>
+        </div>
+        <div class="perf-switch" role="tablist" aria-label="Sumber metrik" id="perfSwitch">
+          <button role="tab" data-src="onnx_test_metrics" aria-selected="true">Test · ONNX</button>
+          <button role="tab" data-src="test_metrics" aria-selected="false">Test · PyTorch</button>
+          <button role="tab" data-src="val_metrics" aria-selected="false">Validasi</button>
+        </div>
+      </div>
+      <p class="perf-note" id="perfSourceNote"></p>
+      <p class="perf-note perf-note--warn hidden" id="perfThreshWarn"></p>
+    </div>
+
+    <h3 class="perf-section">Grading 5 kelas</h3>
+    <div class="grid-4" style="margin-bottom: 20px;" id="perfGradeCards"></div>
+
+    <h3 class="perf-section">Keputusan rujukan (grade ≥ 2)</h3>
+    <div class="grid-4" style="margin-bottom: 20px;" id="perfRefCards"></div>
+
+    <div class="grid-2" style="margin-bottom: 24px;">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Precision, recall, dan F1 per grade</h3>
+            <p class="card-subtitle">Jumlah = foto dengan label grade tersebut di data uji</p>
+          </div>
+        </div>
+        <table class="data-table">
+          <thead><tr><th>Grade</th><th>Precision</th><th>Recall</th><th>F1</th><th>Jumlah</th></tr></thead>
+          <tbody id="perfPerGrade"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Matriks konfusi 5×5</h3>
+            <p class="card-subtitle">Baris = label asli, kolom = prediksi model</p>
+          </div>
+        </div>
+        <div class="matrix-wrap" id="perfMatrix"></div>
+        <div class="perf-ref-counts" id="perfRefCounts"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title" style="margin-bottom: 8px;">Cara membaca</h3>
+      <ul class="perf-legend">
+        <li><b>Precision</b>: dari foto yang diprediksi suatu grade (atau "rujuk"), berapa persen yang benar.</li>
+        <li><b>Recall / sensitivitas</b>: dari foto yang benar-benar grade tersebut (atau perlu rujuk), berapa persen yang tertangkap. Untuk skrining, recall rujukan paling penting.</li>
+        <li><b>F1</b>: rata-rata harmonik precision dan recall. <b>Macro F1</b> merata-ratakan 5 grade setara; <b>weighted F1</b> menimbang tiap grade menurut jumlah fotonya.</li>
+        <li><b>Spesifisitas</b>: dari pasien yang tidak perlu rujuk, berapa persen yang benar dinyatakan aman. <b>NPV</b>: dari hasil "aman", berapa persen yang memang aman.</li>
+        <li><b>Kappa (QWK)</b>: metrik resmi APTOS; kesalahan yang jauh (misal grade 0 ditebak 4) dihukum lebih berat.</li>
+      </ul>
+    </div>
+  </div>
+
   <div id="tab-benchmark" class="tab-content hidden">
     <!-- Action Banner -->
     <div class="sample-bar" style="margin-bottom: 20px;">
@@ -1410,6 +1502,7 @@
       if (btn.dataset.tab === 'tab-history') {
         loadHistory();
       }
+      if (btn.dataset.tab === 'tab-performance') renderPerformance();
       if (btn.dataset.tab === 'tab-camera') startCamera(); else stopCamera();
     });
   });
@@ -1420,6 +1513,8 @@
       const res = await fetch('/api/model/info');
       const info = await res.json();
       document.getElementById('modelInfoLabel').textContent = `${info.model} (${info.img_size}×${info.img_size}px)`;
+      qcThresholds = info.quality_thresholds || null;
+      modelInfo = info;
       document.getElementById('serverDot').classList.remove('offline');
       if (info.referable_prob_threshold) {
         activeThreshold = info.referable_prob_threshold;
@@ -1599,7 +1694,12 @@
 
     vGrade.textContent = `Grade ${d.grade}`;
 
-    if (d.referable) {
+    if (d.quality && d.quality.is_fundus === false) {
+      banner.className = 'verdict-banner ref-yes';
+      vTitle.textContent = 'BUKAN FOTO FUNDUS: HASIL AI TIDAK BERLAKU';
+      vDesc.textContent = `${d.quality.issues.join(', ')}. Di aplikasi klinik, perkiraan AI untuk foto ini disembunyikan dan tidak ikut kesimpulan.`;
+      vIcon.textContent = '×';
+    } else if (d.referable) {
       banner.className = 'verdict-banner ref-yes';
       vTitle.textContent = 'PERHATIAN: PERLU RUJUKAN DOKTER MATA';
       vDesc.textContent = `Peluang rujukan ${(d.p_referable * 100).toFixed(1)}% melewati ambang batas. Memerlukan tindakan klinis.`;
@@ -1617,10 +1717,9 @@
     document.getElementById('imgHeatmap').src = d.heatmap_url || d.image_url;
 
     // Quality metrics
-    document.getElementById('valBrightness').textContent = d.quality.brightness;
-    document.getElementById('valSharpness').textContent = d.quality.sharpness;
     document.getElementById('valPRef').textContent = `${(d.p_referable * 100).toFixed(1)}%`;
-    document.getElementById('valQualityOk').textContent = d.quality.ok ? 'Layak' : `Catatan: ${d.quality.issues.join(', ')}`;
+    document.getElementById('valQualityOk').textContent = qcVerdict(d.quality).text;
+    document.getElementById('qualityDetail').innerHTML = qualityTable(d.quality);
 
     // Prob ladder
     const ladder = document.getElementById('probLadder');
@@ -1741,8 +1840,8 @@
     document.getElementById('cm2FP').textContent = cm.fp;
   }
 
-  function render5x5Matrix(cm) {
-    const container = document.getElementById('matrix5x5Container');
+  function render5x5Matrix(cm, containerId = 'matrix5x5Container') {
+    const container = document.getElementById(containerId);
     let html = `
       <table class="matrix-table">
         <thead>
@@ -1769,10 +1868,10 @@
         let bg = 'rgba(255,255,255,0.03)';
         let textColor = '#F1F5F9';
         if (isDiag && val > 0) {
-          bg = `rgba(16, 185, 129, ${Math.max(0.2, val / 10)})`;
+          bg = `rgba(16, 185, 129, ${Math.max(0.2, Math.min(1, val / rowSum + 0.15))})`;
           textColor = '#34D399';
         } else if (!isDiag && val > 0) {
-          bg = `rgba(239, 68, 68, ${Math.max(0.15, val / 10)})`;
+          bg = `rgba(239, 68, 68, ${Math.max(0.15, Math.min(0.9, val / rowSum * 1.5))})`;
           textColor = '#F87171';
         }
 
@@ -1855,7 +1954,7 @@
 
       tr.innerHTML = `
         <td><img src="${s.image_url}" class="tbl-thumb" alt="${s.id}"></td>
-        <td><code style="font-size: 11px;">${s.id}</code></td>
+        <td><code style="font-size: 11px;">${s.id}</code><div style="margin-top: 4px;">${qcBadge(s.quality)}</div></td>
         <td><span class="badge badge-g${s.true_grade}">G${s.true_grade}: ${s.true_label}</span></td>
         <td><span class="badge badge-g${s.pred_grade}">G${s.pred_grade}: ${s.pred_label}</span></td>
         <td>${(s.confidence * 100).toFixed(1)}%</td>
@@ -2061,6 +2160,146 @@
     settingsDirty: false,  // form diubah tapi belum disimpan
   };
 
+  // --- Performa model: metrik dari metadata.json hasil training ---
+  let modelInfo = null;
+  let perfSource = 'onnx_test_metrics';
+  const PERF_SOURCES = {
+    onnx_test_metrics: 'Data uji (test), dihitung dari file ONNX yang benar-benar dipakai server. Angka ini yang dilaporkan.',
+    test_metrics: 'Data uji (test), dihitung dari model PyTorch di Kaggle sebelum diekspor ke ONNX.',
+    val_metrics: 'Data validasi: dipakai memilih checkpoint dan menyetel ambang rujukan, jadi sedikit optimis.',
+  };
+  const pct = v => (v == null ? '-' : `${(v * 100).toFixed(1)}%`);
+
+  function kpi(label, value, sub, accent) {
+    return `<div class="kpi-card" style="--card-accent: ${accent};">
+      <span class="kpi-label">${label}</span><span class="kpi-value">${value}</span><span class="kpi-sub">${sub}</span></div>`;
+  }
+
+  async function renderPerformance() {
+    if (!modelInfo) {
+      try { modelInfo = await (await fetch('/api/model/info')).json(); } catch (e) { return; }
+    }
+    const info = modelInfo;
+    const available = Object.keys(PERF_SOURCES).filter(k => info[k]);
+    if (!available.includes(perfSource)) perfSource = available[0];
+    document.querySelectorAll('#perfSwitch button').forEach(b => {
+      b.hidden = !info[b.dataset.src];
+      b.setAttribute('aria-selected', String(b.dataset.src === perfSource));
+    });
+
+    const m = info[perfSource];
+    document.getElementById('perfModelName').textContent = `Performa ${info.model}`;
+    const n = m && m.confusion_matrix ? m.confusion_matrix.flat().reduce((a, b) => a + b, 0) : null;
+    document.getElementById('perfModelSub').textContent = [
+      info.architecture, `${info.img_size}×${info.img_size} px`,
+      info.preprocess_mode === 'ben_graham' ? 'preprocessing Ben Graham' : 'preprocessing standar',
+      n ? `${n} foto` : null,
+    ].filter(Boolean).join(' · ');
+    let note = PERF_SOURCES[perfSource] || '';
+    if (perfSource === 'onnx_test_metrics' && info.onnx_test_pred_agreement != null)
+      note += ` Prediksi ONNX sama dengan PyTorch pada ${pct(info.onnx_test_pred_agreement)} foto.`;
+    document.getElementById('perfSourceNote').textContent = note;
+
+    const warn = document.getElementById('perfThreshWarn');
+    const tuned = m && m.referable_prob_threshold != null ? m.referable_prob_threshold : info.tuned_ref_threshold;
+    const live = info.referable_prob_threshold;
+    if (tuned != null && live != null && Math.abs(tuned - live) > 1e-6) {
+      warn.textContent = `Metrik rujukan di bawah dihitung pada ambang ${tuned.toFixed(4)}, sedangkan server saat ini memakai ambang ${live.toFixed(4)} (env REF_PROB). Hasil di aplikasi bisa sedikit berbeda.`;
+      warn.classList.remove('hidden');
+    } else warn.classList.add('hidden');
+
+    if (!m) {
+      document.getElementById('perfGradeCards').innerHTML = '<p style="color: var(--text-muted);">metadata.json model ini tidak memuat metrik.</p>';
+      ['perfRefCards', 'perfPerGrade', 'perfMatrix', 'perfRefCounts'].forEach(id => document.getElementById(id).innerHTML = '');
+      return;
+    }
+    const legacy = m.macro_f1 == null;
+    document.getElementById('perfGradeCards').innerHTML = [
+      kpi('Akurasi', pct(m.accuracy), 'Grade tepat dari 5 kelas', '#3B82F6'),
+      kpi('Kappa (QWK)', m.kappa != null ? m.kappa.toFixed(3) : '-', 'Metrik resmi APTOS', '#10B981'),
+      kpi('Macro F1', pct(m.macro_f1), legacy ? 'Tidak tercatat di model ini' : `Precision ${pct(m.macro_precision)} · recall ${pct(m.macro_recall)}`, '#8B5CF6'),
+      kpi('Weighted F1', pct(m.weighted_f1), 'Ditimbang jumlah foto per grade', '#F59E0B'),
+    ].join('');
+    const c = m.referable_counts;
+    document.getElementById('perfRefCards').innerHTML = [
+      kpi('Recall / sensitivitas', pct(m.referable_sensitivity), c ? `${c.tp} dari ${c.tp + c.fn} yang perlu rujuk tertangkap` : 'Pasien perlu rujuk yang terdeteksi', '#EF4444'),
+      kpi('Precision', pct(m.referable_precision), c ? `${c.tp} dari ${c.tp + c.fp} hasil "rujuk" benar` : 'Tidak tercatat di model ini', '#F97316'),
+      kpi('F1 rujukan', pct(m.referable_f1), `Akurasi keputusan ${pct(m.referable_accuracy)}`, '#8B5CF6'),
+      kpi('Spesifisitas', pct(m.referable_specificity), `NPV ${pct(m.referable_npv)} · AUC ${m.referable_auc != null ? m.referable_auc.toFixed(3) : '-'}`, '#10B981'),
+    ].join('');
+
+    const rows = m.per_grade || [];
+    document.getElementById('perfPerGrade').innerHTML = rows.length ? rows.map(r => `<tr>
+        <td><b style="color: var(--${GRADE_CLASSES[r.grade]});">Grade ${r.grade}</b> (${escapeHtml(r.label)})</td>
+        <td>${pct(r.precision)}</td><td>${pct(r.recall)}</td><td><b>${pct(r.f1)}</b></td><td>${r.support}</td></tr>`).join('')
+      : '<tr><td colspan="5" style="color: var(--text-muted);">Metrik per grade tidak tercatat di model ini. Latih ulang dengan train.py terbaru.</td></tr>';
+    if (m.confusion_matrix) render5x5Matrix(m.confusion_matrix, 'perfMatrix');
+    else document.getElementById('perfMatrix').innerHTML = '';
+    document.getElementById('perfRefCounts').innerHTML = c ? `
+      <div><b>${c.tp}</b>TP: rujuk tepat</div><div><b>${c.fn}</b>FN: terlewat</div>
+      <div><b>${c.fp}</b>FP: rujukan semu</div><div><b>${c.tn}</b>TN: aman tepat</div>` : '';
+  }
+
+  document.querySelectorAll('#perfSwitch button').forEach(b => b.addEventListener('click', () => {
+    perfSource = b.dataset.src;
+    renderPerformance();
+  }));
+
+  // --- Cek kualitas foto fundus: parameter, ambang, dan status lolos ---
+  let qcThresholds = null;
+  // Tiga parameter warna punya dua ambang: ketat (jalur warna kuat) dan longgar (berlaku jika bentuk fundus terpenuhi).
+  // Status: ✓ lolos ambang ketat, ≈ hanya lolos ambang longgar, ✗ gagal.
+  const QC_PARAMS = [
+    { key: 'red_ratio', label: 'Rasio merah R/(R+G+B)', rule: t => `≥ ${t.min_red_ratio} (longgar ${t.loose_min_red_ratio})`, pass: (v, t) => v >= t.min_red_ratio || (v >= t.loose_min_red_ratio && 'loose'), hint: 'Fundus asli kemerahan-oranye' },
+    { key: 'rg_ratio', label: 'Rasio R/G', rule: t => `≥ ${t.min_rg_ratio} (longgar ${t.loose_min_rg_ratio})`, pass: (v, t) => v >= t.min_rg_ratio || (v >= t.loose_min_rg_ratio && 'loose') },
+    { key: 'blue_ratio', label: 'Rasio biru B/(R+G+B)', rule: t => `≤ ${t.max_blue_ratio} (longgar ${t.loose_max_blue_ratio})`, pass: (v, t) => v <= t.max_blue_ratio || (v <= t.loose_max_blue_ratio && 'loose') },
+    { key: 'chroma', label: 'Kromatisitas', rule: t => `≥ ${t.min_chroma}`, pass: (v, t) => v >= t.min_chroma, hint: 'Rendah = foto abu-abu / monokrom / sudah diolah' },
+    { key: 'dark_corners', label: 'Sudut bingkai gelap', rule: t => `≥ ${(t.min_dark_corners * 100).toFixed(0)}%`, pass: (v, t) => v >= t.min_dark_corners, fmt: v => `${(v * 100).toFixed(0)}%`, hint: 'Bentuk fundus: latar gelap di luar lingkaran retina' },
+    { key: 'circularity', label: 'Kebulatan lingkaran retina', rule: t => `≥ ${t.min_circularity}`, pass: (v, t) => v >= t.min_circularity, fmt: v => v.toFixed(2), hint: 'Bentuk fundus' },
+    { key: 'fov_ratio', label: 'Luas area retina di bingkai', rule: t => `≥ ${(t.min_fov * 100).toFixed(0)}%`, pass: (v, t) => v >= t.min_fov, fmt: v => `${(v * 100).toFixed(1)}%` },
+    { key: 'brightness', label: 'Kecerahan (0–255)', rule: t => `${t.min_brightness}–${t.max_brightness}`, pass: (v, t) => v >= t.min_brightness && v <= t.max_brightness },
+    { key: 'overexposed', label: 'Piksel silau', rule: t => `≤ ${(t.max_overexposed * 100).toFixed(0)}%`, pass: (v, t) => v <= t.max_overexposed, fmt: v => `${(v * 100).toFixed(1)}%` },
+    { key: 'sharpness', label: 'Ketajaman (varians Laplacian)', rule: t => `≥ ${t.min_sharpness}`, pass: (v, t) => v >= t.min_sharpness },
+    { key: 'contrast', label: 'Kontras kanal hijau', rule: t => `≥ ${t.min_contrast}`, pass: (v, t) => v >= t.min_contrast },
+  ];
+
+  function qcVerdict(q) {
+    if (!q) return { text: '-', cls: 'badge-qc-warn' };
+    if (q.is_fundus === false) return { text: 'Bukan foto fundus, AI tidak menilai', cls: 'badge-qc-bad' };
+    if (!q.ok) return { text: 'Kualitas kurang, sebaiknya foto ulang', cls: 'badge-qc-warn' };
+    return { text: 'Foto fundus layak dinilai', cls: 'badge-qc-ok' };
+  }
+
+  function qcBadge(q) {
+    const v = qcVerdict(q);
+    const short = q && q.is_fundus === false ? 'Bukan fundus' : (q && !q.ok ? 'Mutu kurang' : 'Layak');
+    return `<span class="badge ${v.cls}" title="${escapeHtml(v.text)}">${short}</span>`;
+  }
+
+  function qualityTable(q) {
+    if (!q) return '';
+    const v = qcVerdict(q);
+    const t = qcThresholds;
+    const rows = QC_PARAMS.filter(p => typeof q[p.key] === 'number').map(p => {
+      const val = q[p.key];
+      const passed = t && p.pass ? p.pass(val, t) : null;
+      const st = passed === null ? '' : passed === 'loose' ? '≈' : passed ? '✓' : '✗';
+      return `<tr data-pass="${passed === null ? '' : passed === 'loose' ? 'loose' : !!passed}" title="${escapeHtml(p.hint || '')}">
+        <td>${p.label}</td>
+        <td class="num">${p.fmt ? p.fmt(val) : val}</td>
+        <td>${t ? p.rule(t) : '-'}</td>
+        <td class="st">${st}</td>
+      </tr>`;
+    }).join('');
+    const legacy = !rows ? '<p style="color: var(--text-muted);">Foto lama: hanya kecerahan dan ketajaman yang tercatat.</p>' : '';
+    return `<div class="qc">
+      <div class="qc__head"><b>Cek kualitas foto fundus</b><span class="badge ${v.cls}">${v.text}</span></div>
+      ${rows ? `<table><thead><tr><th>Parameter</th><th style="text-align:right">Nilai</th><th>Ambang</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : legacy}
+      ${q.issues && q.issues.length ? `<p class="qc__issues">Masalah: ${escapeHtml(q.issues.join(', '))}</p>` : ''}
+      ${rows ? '<p style="margin-top: 6px; color: var(--text-muted);">Fundus dikenali bila tiga parameter warna lolos ambang ketat (✓), atau lolos ambang longgar (≈) dan bentuk fundus terpenuhi (sudut gelap + kebulatan).</p>' : ''}
+    </div>`;
+  }
+
   function escapeHtml(v) {
     return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
@@ -2095,7 +2334,9 @@
     document.getElementById('camResultTime').textContent =
       `${new Date(r.ts * 1000).toLocaleString()} · ${escapeHtml(r.device)}`;
     const q = r.quality || {};
-    const warn = q.ok === false
+    const warn = q.is_fundus === false
+      ? `<div class="cam-warn">Bukan foto fundus (${escapeHtml((q.issues || []).join(', '))}). Hasil AI di bawah tidak berlaku dan disembunyikan di aplikasi klinik.</div>`
+      : q.ok === false
       ? `<div class="cam-warn">Kualitas foto kurang (${escapeHtml((q.issues || []).join(', '))}). Hasil di bawah tidak dapat diandalkan, ulangi pengambilan foto.</div>`
       : '';
     box.innerHTML = `
@@ -2105,9 +2346,9 @@
         <div class="cam-row"><span>Rujukan</span><span>${r.referable ? '<span class="badge badge-ref-yes">Perlu Rujuk</span>' : '<span class="badge badge-ref-no">Aman</span>'}</span></div>
         <div class="cam-row"><span>Keyakinan grade</span><span>${(r.confidence * 100).toFixed(1)}%</span></div>
         <div class="cam-row"><span>Peluang perlu rujuk (P<sub>ref</sub>)</span><span>${(r.p_referable * 100).toFixed(1)}%</span></div>
-        <div class="cam-row"><span>Kecerahan / ketajaman</span><span>${q.brightness ?? '-'} / ${q.sharpness ?? '-'}</span></div>
         <div class="cam-row"><span>Waktu inferensi</span><span>${r.latency_ms} ms</span></div>
-      </div>`;
+      </div>
+      ${qualityTable(q)}`;
     document.querySelectorAll('#camStrip button').forEach(b =>
       b.setAttribute('aria-current', String(b.dataset.id === r.id)));
   }

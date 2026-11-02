@@ -23,3 +23,8 @@ esp32/**/build/
 
 # Arsip snapshot lokal
 *.zip
+
+# Aplikasi web
+web/node_modules/
+server/static/app/
+web/tsconfig.tsbuildinfo

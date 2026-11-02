@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#FFFFFF" />
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      // Terapkan tema sebelum render agar tidak berkedip. Logika lengkap ada di src/lib/theme.ts.
+      (function () {
+        var p = "terang";
+        try { p = localStorage.getItem("retinova.theme") || "terang"; } catch (e) {}
+        var dark = p === "gelap" || (p === "sistem" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        if (dark) document.querySelector('meta[name="theme-color"]').setAttribute("content", "#161719");
+      })();
+    </script>
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="description" content="Retinova: skrining retinopati diabetik untuk perawat lapangan dan dokter." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>Retinova</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

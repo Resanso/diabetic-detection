@@ -1,12 +1,19 @@
-# Base image Python 3.11 slim yang ringan dan kompatibel dengan ONNX Runtime & OpenCV
+# Tahap 1: build aplikasi web (React + Vite) ke server/static/app
+FROM node:22-alpine AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ ./
+RUN npm run build -- --outDir /web/dist
+
+# Tahap 2: server FastAPI + ONNX Runtime
 FROM python:3.11-slim
 
-# Mencegah pembuatan file .pyc dan buffering stdout
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8000
 
-# Install dependensi sistem untuk OpenCV headless dan kompresi
+# Dependensi sistem untuk OpenCV headless
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libsm6 \
@@ -17,21 +24,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Salin dependensi terlebih dahulu agar caching layer Docker optimal
 COPY server/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Salin source code server, model ONNX, dan data benchmark
 COPY server/ /app/
+COPY --from=web /web/dist /app/static/app
 
-# Pastikan direktori data & model tersedia
 RUN mkdir -p /app/data/images /app/data/benchmark /app/model
 
 EXPOSE 8000
 
-# Healthcheck otomatis
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# Jalankan Uvicorn
 CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT}"]

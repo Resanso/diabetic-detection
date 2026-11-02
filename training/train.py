@@ -28,7 +28,7 @@ import pandas as pd
 import timm
 import torch
 import torch.nn as nn
-from sklearn.metrics import cohen_kappa_score, confusion_matrix, roc_auc_score
+from sklearn.metrics import cohen_kappa_score, confusion_matrix, precision_recall_fscore_support, roc_auc_score
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms as T
@@ -136,13 +136,31 @@ def compute_metrics(probs, targets, ref_prob):
     tp = int((ref_p & ref_t).sum()); fn = int((~ref_p & ref_t).sum())
     tn = int((~ref_p & ~ref_t).sum()); fp = int((ref_p & ~ref_t).sum())
     both_classes = 0 < ref_t.sum() < len(ref_t)
+    # Precision/recall/F1 per grade; zero_division=0 agar grade tanpa prediksi tidak memunculkan warning
+    prec, rec, f1, support = precision_recall_fscore_support(targets, preds, labels=range(5), zero_division=0)
+    ref_prec = tp / max(tp + fp, 1)
+    ref_rec = tp / max(tp + fn, 1)
     return {
         "kappa": float(cohen_kappa_score(targets, preds, weights="quadratic")),
         "accuracy": float((preds == targets).mean()),
+        "macro_precision": float(prec.mean()),
+        "macro_recall": float(rec.mean()),
+        "macro_f1": float(f1.mean()),
+        "weighted_f1": float(np.average(f1, weights=support)) if support.sum() else 0.0,
+        "per_grade": [
+            {"grade": g, "label": LABELS[g], "precision": float(prec[g]), "recall": float(rec[g]),
+             "f1": float(f1[g]), "support": int(support[g])}
+            for g in range(5)
+        ],
         "referable_auc": float(roc_auc_score(ref_t, p_ref)) if both_classes else None,
         "referable_prob_threshold": ref_prob,
-        "referable_sensitivity": tp / max(tp + fn, 1),
+        "referable_accuracy": (tp + tn) / max(len(targets), 1),
+        "referable_precision": ref_prec,
+        "referable_sensitivity": ref_rec,  # = recall rujukan
         "referable_specificity": tn / max(tn + fp, 1),
+        "referable_npv": tn / max(tn + fn, 1),
+        "referable_f1": 2 * ref_prec * ref_rec / max(ref_prec + ref_rec, 1e-9),
+        "referable_counts": {"tp": tp, "fp": fp, "fn": fn, "tn": tn},
         "confusion_matrix": confusion_matrix(targets, preds, labels=range(5)).tolist(),
     }
 
@@ -188,6 +206,18 @@ def export_onnx(model, path):
     diff = float(np.abs(out_onnx - out_torch).max())
     print(f"ONNX diekspor ke {path} | selisih maks vs PyTorch: {diff:.2e}")
     return diff
+
+
+def predict_onnx(path, loader):
+    """Probabilitas softmax dari file ONNX, persis seperti yang dijalankan server."""
+    import onnxruntime as ort
+    sess = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+    probs = []
+    for x, _ in loader:
+        logits = sess.run(None, {"input": x.numpy()})[0]
+        e = np.exp(logits - logits.max(1, keepdims=True))
+        probs.append(e / e.sum(1, keepdims=True))
+    return np.concatenate(probs)
 
 
 def main():
@@ -266,27 +296,45 @@ def main():
         ref_prob = tune_ref_threshold(va_probs, va_targets, args.target_sens)
         print(f"Ambang rujukan dari val (target sensitivitas {args.target_sens}): {ref_prob:.4f}")
     val_metrics = compute_metrics(va_probs, va_targets, ref_prob)
-    test_metrics = compute_metrics(*predict(model, te_dl, device), ref_prob=ref_prob)
+    te_probs, te_targets = predict(model, te_dl, device)
+    test_metrics = compute_metrics(te_probs, te_targets, ref_prob)
     for name, m in [("VAL ", val_metrics), ("TEST", test_metrics)]:
         auc = f"{m['referable_auc']:.4f}" if m["referable_auc"] is not None else "n/a"
-        print(f"{name}: kappa={m['kappa']:.4f} acc={m['accuracy']:.4f} auc_ref={auc} "
-              f"sens_ref={m['referable_sensitivity']:.3f} spec_ref={m['referable_specificity']:.3f}")
+        print(f"{name}: kappa={m['kappa']:.4f} acc={m['accuracy']:.4f} macro_f1={m['macro_f1']:.4f} "
+              f"weighted_f1={m['weighted_f1']:.4f} auc_ref={auc}")
+        print(f"      rujukan: prec={m['referable_precision']:.3f} recall={m['referable_sensitivity']:.3f} "
+              f"f1={m['referable_f1']:.3f} spec={m['referable_specificity']:.3f} npv={m['referable_npv']:.3f}")
 
     onnx_path = os.path.join(args.out, "dr_model.onnx")
     diff = export_onnx(model, onnx_path)
 
+    # Metrik test dihitung ulang dari file ONNX: inilah angka model yang benar-benar dipasang di server
+    onnx_probs = predict_onnx(onnx_path, te_dl)
+    onnx_test_metrics = compute_metrics(onnx_probs, te_targets, ref_prob)
+    prob_diff = float(np.abs(onnx_probs - te_probs).max())
+    agree = float((onnx_probs.argmax(1) == te_probs.argmax(1)).mean())
+    print(f"ONNX di test: kappa={onnx_test_metrics['kappa']:.4f} acc={onnx_test_metrics['accuracy']:.4f} "
+          f"macro_f1={onnx_test_metrics['macro_f1']:.4f} f1_ref={onnx_test_metrics['referable_f1']:.3f} | "
+          f"selisih prob maks vs PyTorch={prob_diff:.4f}, prediksi sama={agree:.4f}")
+
     meta = {
         "model": args.model,
+        "architecture": args.model,
         "img_size": IMG_SIZE,
         "mean": MEAN.tolist(),
         "std": STD.tolist(),
         "labels": LABELS,
+        # Server membaca ini untuk memilih preprocessing yang sama dengan saat training
+        "preprocess_mode": "ben_graham",
         "referable_threshold_grade": REF_GRADE,
         "referable_prob_threshold": ref_prob,
         "selection_metric": args.select,
         "val_metrics": val_metrics,
         "test_metrics": test_metrics,
+        "onnx_test_metrics": onnx_test_metrics,
         "onnx_max_diff": diff,
+        "onnx_test_prob_max_diff": prob_diff,
+        "onnx_test_pred_agreement": agree,
     }
     with open(os.path.join(args.out, "metadata.json"), "w") as f:
         json.dump(meta, f, indent=2)
