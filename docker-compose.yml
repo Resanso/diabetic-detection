@@ -5,6 +5,10 @@ services:
       dockerfile: Dockerfile
     container_name: diabetic-detection-app
     restart: unless-stopped
+    # Kredensial SATUSEHAT dan rahasia lain (tidak ikut image; lihat server/.env.example)
+    env_file:
+      - path: server/.env
+        required: false
     ports:
       # Aplikasi web dilayani lewat nginx (HTTPS). Port ini tetap terbuka untuk ESP32-CAM yang mengirim HTTP biasa.
       - "8000:8000"
@@ -19,6 +23,9 @@ services:
       - BPJS_CONS_ID=${BPJS_CONS_ID:-}              # kredensial VClaim BPJS; kosong = cek BPJS nonaktif
       - BPJS_SECRET=${BPJS_SECRET:-}
       - BPJS_USER_KEY=${BPJS_USER_KEY:-}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-127.0.0.1,::1}   # tambahkan gateway Docker (mis. 172.18.0.1) bila di balik nginx host
+      - LLM_URL=${LLM_URL:-http://127.0.0.1:8081}   # llama-server untuk deskripsi AI; tidak ada = fitur nonaktif
+      - LLM_AUTO=${LLM_AUTO:-0}
       - BPJS_BASE_URL=${BPJS_BASE_URL:-https://apijkn-dev.bpjs-kesehatan.go.id/vclaim-rest-dev}
     volumes:
       # Data pasien, SQLite, dan foto tetap ada walau container dibuat ulang

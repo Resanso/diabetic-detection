@@ -23,6 +23,8 @@ from database import db
 TRUSTED_PROXIES = {p.strip() for p in os.getenv("TRUSTED_PROXIES", "127.0.0.1,::1").split(",") if p.strip()}
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"
 
+_ID_RE = re.compile(r"/[0-9a-f]{12}(?=/|_|\.|$)")
+
 _ip: contextvars.ContextVar[str | None] = contextvars.ContextVar("client_ip", default=None)
 
 
@@ -124,7 +126,8 @@ def install(app, index_html_path: str):
         if _AUDITED.match(path) and not (request.method == "GET" and path.startswith("/api/screenings")
                                          and response.status_code == 304):
             uid, role = _session_user(request)
-            audit(f"{request.method} {re.sub(r'/[0-9a-f]{12}(?=/|_|\\.|$)', '/{id}', path)}", uid, role,
+            norm = _ID_RE.sub("/{id}", path)
+            audit(f"{request.method} {norm}", uid, role,
                   target=_target(path), status=response.status_code, ip=ip)
         return response
 
