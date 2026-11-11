@@ -334,6 +334,18 @@ textarea.input { min-height: 96px; resize: vertical; }
 .banner--warn { background: var(--g1-bg); color: var(--g1); }
 .banner--danger { background: var(--danger-soft); color: var(--danger); }
 .banner--ok { background: var(--g0-bg); color: var(--g0); }
+
+/* Status sinyal dan pengiriman data offline, di atas bilah judul */
+.offline-bar {
+  display: flex; gap: var(--s2); align-items: center;
+  padding: calc(var(--s2) + var(--safe-top)) var(--s4) var(--s2);
+  font-size: 14px; line-height: 20px;
+  background: var(--surface-2); color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+}
+.offline-bar svg { flex: none; }
+.offline-bar--info { background: var(--accent-soft); color: var(--accent-text); }
+.offline-bar--danger { background: var(--danger-soft); color: var(--danger); }
 .banner strong { font-weight: 600; }
 
 .hero-cta {

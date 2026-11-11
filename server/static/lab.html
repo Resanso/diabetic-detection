@@ -740,7 +740,6 @@
     overflow: hidden; display: flex; align-items: center; justify-content: center;
   }
   .cam-frame img { width: 100%; height: 100%; object-fit: contain; display: block; }
-  #tab-camera [hidden] { display: none; }   /* aturan display di atas mengalahkan atribut hidden */
   .cam-placeholder { color: var(--text-muted); font-size: 13px; text-align: center; padding: 24px; }
   .cam-overlay {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -753,6 +752,10 @@
   }
   @keyframes cam-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .cam-spinner { animation: none; } }
+  .cam-live-badge {
+    position: absolute; top: 10px; left: 10px; padding: 3px 8px; border-radius: var(--radius-sm);
+    background: var(--g3); color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  }
   .cam-actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
   .cam-result { display: grid; gap: 12px; }
   .perf-switch { display: inline-flex; background: var(--bg-card-subtle); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 3px; gap: 2px; }
@@ -1326,6 +1329,7 @@
           <div class="cam-placeholder" id="camPlaceholder">Kamera ESP32 belum terhubung.<br>Nyalakan perangkat; tampilan kamera muncul otomatis.</div>
           <img id="camImage" alt="Foto terbaru dari ESP32-CAM" hidden>
           <img id="camLive" alt="Live view ESP32-CAM" hidden>
+          <span class="cam-live-badge" id="camLiveBadge" hidden>LIVE</span>
           <div class="cam-overlay" id="camOverlay" hidden><span class="cam-spinner"></span><span id="camOverlayText">Menunggu foto dari ESP32...</span></div>
         </div>
         <div class="cam-actions">
@@ -2485,6 +2489,7 @@
     cam.liveBaseline = cam.frameTs;
     live.src = `/api/devices/${encodeURIComponent(cam.device)}/stream?t=${Date.now()}`;
     live.hidden = false;
+    document.getElementById('camLiveBadge').hidden = false;
     document.getElementById('camImage').hidden = true;
     document.getElementById('camPlaceholder').hidden = true;
     document.getElementById('camOverlayText').textContent = 'Membuka kamera...';
@@ -2497,6 +2502,7 @@
     live.removeAttribute('src');   // menutup koneksi stream
     live.hidden = true;
     cam.live = false;
+    document.getElementById('camLiveBadge').hidden = true;
     if (cam.waitingSince === null) document.getElementById('camOverlay').hidden = true;
     renderCamResult(cam.results.find(r => r.id === cam.selectedId) || cam.results[0] || null);
   }

@@ -7,6 +7,24 @@ import { ageOf, cap, DIABETES_LABELS, PAYER_LABELS, fmtDate, fmtWhen } from "../
 import { ActionBar, Banner, ConfirmDelete, Empty, SkeletonRows, TopBar, useAsync, useToast } from "../components/ui";
 import { ScreeningRow } from "../components/ScreeningRow";
 import { useStartScreening } from "./NewScreening";
+import { findPatient, isLocalId } from "../lib/offline/store";
+import { isNetworkError } from "../lib/offline/sync";
+
+type Detail = Patient & { screenings: ScreeningSummary[] };
+
+/** Dari server; tanpa sinyal (atau pasien yang didaftarkan offline) dari salinan di HP, tanpa riwayat pemeriksaan. */
+async function loadPatient(id: string): Promise<Detail> {
+  if (!isLocalId(id)) {
+    try {
+      return await get<Detail>(`/api/patients/${id}`);
+    } catch (e) {
+      if (!isNetworkError(e)) throw e;
+    }
+  }
+  const p = await findPatient(id);
+  if (!p) throw new Error("Tidak ada sinyal, dan data pasien ini belum tersimpan di HP.");
+  return { ...p, screenings: [] };
+}
 
 const yn = (v: boolean | null) => (v == null ? "-" : v ? "Ya" : "Tidak");
 
@@ -14,10 +32,8 @@ export default function PatientDetail() {
   const { id } = useParams();
   const { user } = useAuth();
   const { start, busy, error: startError } = useStartScreening();
-  const { data: p, error, loading } = useAsync(
-    () => get<Patient & { screenings: ScreeningSummary[] }>(`/api/patients/${id}`),
-    [id],
-  );
+  const { data: p, error, loading } = useAsync(() => loadPatient(id!), [id]);
+  const offlineCopy = isLocalId(p?.id);
   const navigate = useNavigate();
   const toast = useToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -34,7 +50,7 @@ export default function PatientDetail() {
   }
   const canScreen = !!user;
   // Admin selalu boleh; pendaftar hanya selama belum ada pemeriksaan yang dikirim (server memeriksa ulang)
-  const canDelete = !!p && (user?.role === "admin" || (p.created_by === user?.id && p.screenings.every((s) => s.status === "draf")));
+  const canDelete = !!p && !offlineCopy && (user?.role === "admin" || (p.created_by === user?.id && p.screenings.every((s) => s.status === "draf")));
   const age = ageOf(p?.birth_date);
 
   return (
@@ -44,7 +60,7 @@ export default function PatientDetail() {
         sub={p ? <span className="mono">{p.mrn}</span> : undefined}
         back={true}
         action={
-          p && (
+          p && !offlineCopy && (
             <Link to={`/pasien/${p.id}/ubah`} className="btn btn--ghost">
               <PencilSimple size={18} />
               Ubah
@@ -56,6 +72,9 @@ export default function PatientDetail() {
         {error && <Banner tone="danger">{error}</Banner>}
         {startError && <Banner tone="danger">{startError}</Banner>}
         {loading && !p && <SkeletonRows rows={2} />}
+        {offlineCopy && (
+          <Banner tone="info">Pasien ini didaftarkan tanpa sinyal dan belum terkirim ke server. Data dikirim otomatis saat ada sinyal.</Banner>
+        )}
         {p && (
           <>
             <section className="card">
@@ -172,7 +191,7 @@ export default function PatientDetail() {
       )}
       {canScreen && p && (
         <ActionBar>
-          <button className="btn btn--primary btn--lg" disabled={busy} onClick={() => start(p.id)}>
+          <button className="btn btn--primary btn--lg" disabled={busy} onClick={() => start(p)}>
             <Camera size={22} />
             {busy ? "Menyiapkan..." : "Periksa sekarang"}
           </button>

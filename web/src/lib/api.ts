@@ -109,6 +109,8 @@ export interface RetinaImage {
   referable?: boolean;
   p_referable?: number;
   probs?: number[];
+  /** Hanya foto offline: alasan AI di HP belum menilai foto ini. */
+  ai_error?: string;
 }
 
 export interface Tariff {
@@ -233,6 +235,15 @@ export function onUnauthorized(fn: Listener) {
   };
 }
 
+const networkListeners = new Set<(ok: boolean) => void>();
+/** Dipanggil tiap kali permintaan ke server berhasil terhubung (true) atau gagal karena sinyal (false). */
+export function onNetwork(fn: (ok: boolean) => void) {
+  networkListeners.add(fn);
+  return () => {
+    networkListeners.delete(fn);
+  };
+}
+
 function errorMessage(body: unknown, status: number): string {
   const detail = (body as { detail?: unknown } | null)?.detail;
   if (typeof detail === "string") return detail;
@@ -258,8 +269,11 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
       body: json !== undefined ? JSON.stringify(json) : rest.body,
     });
   } catch {
+    networkListeners.forEach((fn) => fn(false));
     throw new ApiError(0, errorMessage(null, 0));
   }
+  // Jawaban dari cache service worker saat offline tidak dihitung sebagai tersambung
+  if (!res.headers.has("x-retinova-cache")) networkListeners.forEach((fn) => fn(true));
   const body = res.headers.get("content-type")?.includes("json") ? await res.json() : null;
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith("/api/auth/")) unauthorizedListeners.forEach((fn) => fn());

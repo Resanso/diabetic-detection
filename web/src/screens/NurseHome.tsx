@@ -4,6 +4,7 @@ import { get, type ScreeningSummary } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Banner, Empty, Logo, SkeletonRows, useAsync } from "../components/ui";
 import { ScreeningRow } from "../components/ScreeningRow";
+import { LocalWork } from "../components/OfflineWork";
 
 interface Summary {
   drafts: number;
@@ -74,6 +75,8 @@ export default function NurseHome() {
             dan beri tahu pasien.
           </Banner>
         )}
+
+        <LocalWork />
 
         {!!drafts.data?.length && (
           <section>

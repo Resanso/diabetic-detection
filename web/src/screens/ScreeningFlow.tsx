@@ -1,25 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Camera, Cpu, DeviceMobileCamera, Trash, UploadSimple, WarningCircle, CheckCircle } from "@phosphor-icons/react";
-import {
-  del,
-  get,
-  patch,
-  post,
-  uploadImage,
-  put,
-  type Eye,
-  type RetinaImage,
-  type ScreeningDetail,
-  type Billing,
-  type Tariff,
-} from "../lib/api";
+import { get, put, type Billing, type Eye, type RetinaImage, type ScreeningDetail, type Tariff } from "../lib/api";
+import { draftOps } from "../lib/offline/drafts";
+import { modelState } from "../lib/offline/ai";
 import { useAuth } from "../lib/auth";
-import { GLUCOSE_KIND, fmtRp, patientMeta } from "../lib/format";
-import { ActionBar, Banner, ConfirmDelete, Field, Segmented, Sheet, TopBar, useToast } from "../components/ui";
+import { GLUCOSE_KIND, fmtPct, fmtRp, patientMeta } from "../lib/format";
+import { ActionBar, Banner, ConfirmDelete, Field, GradeChip, Segmented, Sheet, TopBar, useToast } from "../components/ui";
 import { PhoneCamera } from "../components/PhoneCamera";
 import { Esp32Capture } from "../components/Esp32Capture";
 import { RetinaViewer } from "../components/RetinaViewer";
+import { AiPanel } from "../components/AiPanel";
 
 type Source = "hp" | "esp32";
 const SOURCE_KEY = "retinova.source";
@@ -87,6 +78,8 @@ export default function ScreeningFlow() {
   const toast = useToast();
   // Dokter yang memotret sendiri langsung lanjut membaca; tidak ada "kirim ke dokter"
   const isDoctor = useAuth().user?.role === "dokter";
+  // Draf yang dibuat tanpa sinyal tersimpan di HP dan dikirim saat ada sinyal
+  const ops = useMemo(() => draftOps(id!), [id]);
 
   const [s, setS] = useState<ScreeningDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -94,7 +87,9 @@ export default function ScreeningFlow() {
   const [errors, setErrors] = useState<Partial<Record<keyof Vitals, string>>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [source, setSource] = useState<Source>((store.get(SOURCE_KEY) as Source) || "hp");
+  const [sourcePref, setSource] = useState<Source>((store.get(SOURCE_KEY) as Source) || "hp");
+  // ESP32-CAM dikendalikan lewat server, jadi tidak tersedia untuk draf offline
+  const source: Source = ops.local ? "hp" : sourcePref;
   const [camera, setCamera] = useState<Eye | null>(null);
   const [esp, setEsp] = useState<Eye | null>(null);
   const [uploading, setUploading] = useState<Eye | null>(null);
@@ -107,10 +102,13 @@ export default function ScreeningFlow() {
   const fileEye = useRef<Eye>("kanan");
 
   useEffect(() => {
-    get<ScreeningDetail>(`/api/screenings/${id}`)
+    ops
+      .load()
       .then((d) => {
         if (d.status !== "draf") return navigate(`/pemeriksaan/${d.id}`, { replace: true });
         setS(d);
+        // Foto yang belum dinilai AI (model belum ada saat difoto) dinilai ulang di latar
+        ops.retryAi?.().then((n) => n && setS((p) => (p ? { ...p, images: n.images, ai_grade: n.ai_grade, ai_p_referable: n.ai_p_referable } : p)));
         setV({
           location: d.location ?? store.get(LOCATION_KEY) ?? "",
           glucose: str(d.glucose),
@@ -125,8 +123,9 @@ export default function ScreeningFlow() {
         });
       })
       .catch((e) => setLoadError(e.message));
-    get<Tariff[]>("/api/tariffs").then(setTariffs).catch(() => undefined);
-  }, [id, navigate]);
+    // Tarif hanya untuk pemeriksaan yang sudah ada di server; draf offline memakai tarif bawaan saat dikirim
+    if (!ops.local) get<Tariff[]>("/api/tariffs").then(setTariffs).catch(() => undefined);
+  }, [ops, navigate]);
 
   async function chooseTariff(tariffId: string) {
     setError(null);
@@ -149,7 +148,7 @@ export default function ScreeningFlow() {
     setError(null);
     try {
       if (v.location) store.set(LOCATION_KEY, v.location);
-      const d = await patch<ScreeningDetail>(`/api/screenings/${id}`, {
+      const d = await ops.saveVitals({
         location: v.location,
         glucose: toNum(v.glucose),
         glucose_kind: v.glucose_kind,
@@ -185,7 +184,7 @@ export default function ScreeningFlow() {
     setUploading(eye);
     setError(null);
     try {
-      addImage(await uploadImage(id!, eye, await shrinkImage(blob), src));
+      addImage(await ops.addImage(eye, await shrinkImage(blob), src));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -212,7 +211,7 @@ export default function ScreeningFlow() {
 
   async function removeImage(img: RetinaImage) {
     try {
-      await del(`/api/screenings/${id}/images/${img.id}`);
+      await ops.removeImage(img.id);
       setS((p) => (p ? { ...p, images: p.images.filter((x) => x.id !== img.id) } : p));
       setViewing(null);
     } catch (e) {
@@ -224,8 +223,12 @@ export default function ScreeningFlow() {
     setBusy(true);
     setError(null);
     try {
-      if (v?.nurse_notes !== (s?.nurse_notes ?? "")) await patch(`/api/screenings/${id}`, { nurse_notes: v?.nurse_notes });
-      await post(`/api/screenings/${id}/submit`);
+      await ops.submit(v && v.nurse_notes !== (s?.nurse_notes ?? "") ? v.nurse_notes : null);
+      if (ops.local) {
+        toast("Tersimpan di HP. Dikirim otomatis saat ada sinyal");
+        navigate("/", { replace: true });
+        return;
+      }
       toast(isDoctor ? "Siap dibaca" : "Terkirim ke dokter");
       navigate(`/pemeriksaan/${id}`, { replace: true });
     } catch (e) {
@@ -235,7 +238,7 @@ export default function ScreeningFlow() {
   }
 
   async function deleteDraft() {
-    await del(`/api/screenings/${id}`);
+    await ops.remove();
     toast("Draf pemeriksaan dihapus");
     navigate("/", { replace: true });
   }
@@ -292,6 +295,18 @@ export default function ScreeningFlow() {
           ))}
         </ol>
 
+        {ops.local && (
+          <Banner tone="info">
+            <strong>Mode offline.</strong> Pemeriksaan ini disimpan di HP dan dinilai AI di HP. Setelah dikirim, data masuk ke
+            server otomatis begitu ada sinyal, lalu foto dinilai ulang oleh server untuk dokter.
+          </Banner>
+        )}
+        {ops.local && modelState() !== "siap" && (
+          <Banner tone="warn">
+            Model AI belum ada di HP ini, jadi foto belum bisa dinilai AI. Foto tetap tersimpan. Buka aplikasi sekali saat ada
+            sinyal (tunggu sampai Akun menampilkan "AI siap dipakai tanpa sinyal"); foto akan dinilai saat draf dibuka lagi.
+          </Banner>
+        )}
         {error && <Banner tone="danger">{error}</Banner>}
 
         {step === 1 && (
@@ -384,7 +399,7 @@ export default function ScreeningFlow() {
               </Field>
             </section>
 
-            {tariffs.length > 0 && (
+            {!ops.local && tariffs.length > 0 && (
               <section className="formgroup">
                 <Field
                   label="Biaya pemeriksaan"
@@ -414,7 +429,7 @@ export default function ScreeningFlow() {
 
         {step === 2 && (
           <>
-            <section className="stack-sm">
+            {!ops.local && <section className="stack-sm">
               <h2 className="t-label muted">Kamera yang dipakai</h2>
               <Segmented
                 label="Sumber kamera"
@@ -425,7 +440,7 @@ export default function ScreeningFlow() {
                   { value: "esp32", label: <><Cpu size={18} /> ESP32-CAM</> },
                 ]}
               />
-            </section>
+            </section>}
             <Banner tone="info">
               {source === "hp"
                 ? "Pasang lensa fundus di kamera belakang HP. Redupkan ruangan beberapa menit agar pupil melebar, lalu foto satu per satu mata. Foto yang sudah ada di HP atau kamera fundus lain bisa diunggah lewat Unggah file."
@@ -469,6 +484,7 @@ export default function ScreeningFlow() {
                     ) : (
                       <div className="eye__empty">Belum ada foto</div>
                     )}
+                    {ops.local && img && <OfflineAi img={img} threshold={s.ref_threshold} />}
                     {list.length > 1 && (
                       <div className="eye__more" role="group" aria-label={`Foto mata ${eye} lainnya`}>
                         {list.map((i, n) => (
@@ -555,6 +571,7 @@ export default function ScreeningFlow() {
                     ) : (
                       <div className="eye__empty">Tidak difoto</div>
                     )}
+                    {ops.local && img && <OfflineAi img={img} threshold={s.ref_threshold} />}
                     <span className="t-caption">{byEye(eye).length} foto{img && !img.quality.ok ? ", kualitas kurang" : ""}</span>
                   </div>
                 );
@@ -587,7 +604,7 @@ export default function ScreeningFlow() {
         )}
         {step === 3 && (
           <button className="btn btn--primary btn--lg" disabled={busy || !s.images.length} onClick={submit}>
-            {busy ? "Menyimpan..." : isDoctor ? "Lanjut ke pembacaan" : "Kirim ke dokter"}
+            {busy ? "Menyimpan..." : ops.local ? "Simpan dan kirim saat ada sinyal" : isDoctor ? "Lanjut ke pembacaan" : "Kirim ke dokter"}
           </button>
         )}
       </ActionBar>
@@ -608,6 +625,7 @@ export default function ScreeningFlow() {
         <Sheet title={`Mata ${viewing.eye}`} onClose={() => setViewing(null)}>
           <div className="stack">
             <RetinaViewer image={viewing} modes={false} />
+            {ops.local && (viewing.ai_error ? <Banner tone="warn">AI belum menilai foto ini: {viewing.ai_error}</Banner> : <AiPanel image={viewing} threshold={s.ref_threshold} />)}
             {!viewing.quality.ok && <Banner tone="warn">Kualitas kurang: {viewing.quality.issues.join(", ")}.</Banner>}
             <button className="btn btn--danger btn--block" onClick={() => removeImage(viewing)}>
               <Trash size={20} />
@@ -622,6 +640,21 @@ export default function ScreeningFlow() {
         </ConfirmDelete>
       )}
     </>
+  );
+}
+
+/** Ringkasan AI di kartu mata untuk draf offline (dinilai di HP). Kosong bila peran ini tidak boleh melihat AI. */
+function OfflineAi({ img, threshold }: { img: RetinaImage; threshold: number | null }) {
+  if (img.ai_error) return <p className="t-caption" style={{ color: "var(--g1)" }}>AI belum menilai foto ini: {img.ai_error}</p>;
+  if (img.grade == null) return null;
+  const high = threshold != null && (img.p_referable ?? 0) >= threshold;
+  return (
+    <div className="ai-line">
+      <GradeChip grade={img.grade} prefix="AI: " />
+      <span className="ai-line__p" data-high={high}>
+        Risiko rujuk {fmtPct(img.p_referable)}
+      </span>
+    </div>
   );
 }
 

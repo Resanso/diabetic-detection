@@ -435,20 +435,25 @@ def create_patient(body: PatientBody, user: dict = Depends(require_role("perawat
     body.check_complete()
     if body.consent is False:
         raise HTTPException(422, "Data pasien hanya boleh disimpan setelah pasien menyetujui pemrosesan datanya.")
-    now = time.time()
-    pid = new_id()
     with db() as conn:
         if body.nik and conn.execute("SELECT 1 FROM patients WHERE nik=?", (body.nik,)).fetchone():
             raise HTTPException(409, "Pasien dengan NIK ini sudah terdaftar. Cari namanya di daftar pasien.")
-        conn.execute(
-            f"INSERT INTO patients (id, mrn, {', '.join(PATIENT_FIELDS)}, created_by, created_at, updated_at)"
-            f" VALUES (?, ?, {', '.join('?' * len(PATIENT_FIELDS))}, ?, ?, ?)",
-            [pid, next_mrn(conn), *patient_values(body), user["id"], now, now])
-        if body.consent:
-            conn.execute("UPDATE patients SET consent_at=?, consent_by=?, consent_version=? WHERE id=?",
-                         (now, user["id"], CONSENT_VERSION, pid))
+        pid = insert_patient(conn, body, user)
         row = conn.execute("SELECT * FROM patients WHERE id=?", (pid,)).fetchone()
     return patient_dict(row)
+
+
+def insert_patient(conn, body: PatientBody, user: dict) -> str:
+    now = time.time()
+    pid = new_id()
+    conn.execute(
+        f"INSERT INTO patients (id, mrn, {', '.join(PATIENT_FIELDS)}, created_by, created_at, updated_at)"
+        f" VALUES (?, ?, {', '.join('?' * len(PATIENT_FIELDS))}, ?, ?, ?)",
+        [pid, next_mrn(conn), *patient_values(body), user["id"], now, now])
+    if body.consent:
+        conn.execute("UPDATE patients SET consent_at=?, consent_by=?, consent_version=? WHERE id=?",
+                     (now, user["id"], CONSENT_VERSION, pid))
+    return pid
 
 
 @router.get("/api/patients/{patient_id}")
@@ -716,17 +721,22 @@ def list_screenings(status: str | None = Query(None, pattern="^(draf|menunggu|di
 
 @router.post("/api/screenings")
 def create_screening(body: ScreeningCreate, user: dict = Depends(require_role("perawat", "dokter", "admin"))):
-    sid = new_id()
     with db() as conn:
-        if not conn.execute("SELECT 1 FROM patients WHERE id=?", (body.patient_id,)).fetchone():
-            raise HTTPException(404, "Pasien tidak ditemukan.")
-        conn.execute(
-            f"INSERT INTO screenings (id, patient_id, nurse_id, status, created_at, {', '.join(SCREENING_FIELDS)})"
-            f" VALUES (?, ?, ?, 'draf', ?, {', '.join('?' * len(SCREENING_FIELDS))})",
-            [sid, body.patient_id, user["id"], time.time(),
-             *[clean(v) if isinstance(v, str) else v for v in (getattr(body, k) for k in SCREENING_FIELDS)]])
-        billing.apply_tariff(conn, sid, body.tariff_id)
+        sid = insert_screening(conn, body, user, time.time())
         return screening_detail(conn, load_screening(conn, sid), user)
+
+
+def insert_screening(conn, body: ScreeningCreate, user: dict, created_at: float) -> str:
+    if not conn.execute("SELECT 1 FROM patients WHERE id=?", (body.patient_id,)).fetchone():
+        raise HTTPException(404, "Pasien tidak ditemukan.")
+    sid = new_id()
+    conn.execute(
+        f"INSERT INTO screenings (id, patient_id, nurse_id, status, created_at, {', '.join(SCREENING_FIELDS)})"
+        f" VALUES (?, ?, ?, 'draf', ?, {', '.join('?' * len(SCREENING_FIELDS))})",
+        [sid, body.patient_id, user["id"], created_at,
+         *[clean(v) if isinstance(v, str) else v for v in (getattr(body, k) for k in SCREENING_FIELDS)]])
+    billing.apply_tariff(conn, sid, getattr(body, "tariff_id", None))
+    return sid
 
 
 @router.get("/api/screenings/{screening_id}")
@@ -762,12 +772,19 @@ def delete_screening(screening_id: str, user: dict = Depends(current_user)):
 
 @router.post("/api/screenings/{screening_id}/images")
 async def add_image(screening_id: str, eye: str = Form(...), source: str = Form("hp"),
-                    file: UploadFile = File(...), user: dict = Depends(current_user)):
+                    file: UploadFile = File(...), client_id: str | None = Form(None, max_length=64),
+                    user: dict = Depends(current_user)):
+    """client_id dikirim foto yang diambil offline; foto yang sama tidak tersimpan dua kali saat dikirim ulang."""
     if eye not in EYES:
         raise HTTPException(400, "Mata harus 'kanan' atau 'kiri'.")
     if source not in ("hp", "galeri"):
         source = "hp"
     with db() as conn:
+        if client_id:
+            done = synced_id(conn, client_id, "image", user)
+            row = done and conn.execute("SELECT * FROM results WHERE id=?", (done,)).fetchone()
+            if row:
+                return image_for(user, row)
         ensure_editable(load_screening(conn, screening_id), user)
     data = await file.read()
     if len(data) > MAX_BYTES:
@@ -775,6 +792,8 @@ async def add_image(screening_id: str, eye: str = Form(...), source: str = Form(
     result = await run_in_threadpool(run_inference, data, f"{source}:{user['username']}", source, None,
                                      screening_id, eye, user["id"])
     with db() as conn:
+        if client_id:
+            log_sync(conn, client_id, "image", result["id"], user)
         refresh_ai_summary(conn, screening_id)
         row = conn.execute("SELECT * FROM results WHERE id=?", (result["id"],)).fetchone()
         return image_for(user, row)
@@ -849,6 +868,67 @@ def review_screening(screening_id: str, body: ReviewBody, user: dict = Depends(r
         llm.start(screening_id)
     satusehat.send_in_background(screening_id)   # setelah commit, supaya pengirim membaca bacaan terbaru
     return detail
+
+
+# --- Sinkronisasi data offline ---
+# HP menyimpan pasien baru dan pemeriksaan di IndexedDB saat tidak ada sinyal, lalu mengirimnya ke sini.
+# Foto diunggah lewat endpoint foto biasa (dengan client_id) dan pemeriksaan dikirim lewat endpoint submit.
+
+def synced_id(conn, client_id: str, kind: str, user: dict) -> str | None:
+    r = conn.execute("SELECT kind, server_id, user_id FROM sync_log WHERE client_id=?", (client_id,)).fetchone()
+    if r is None:
+        return None
+    if r["kind"] != kind or r["user_id"] != user["id"]:
+        raise HTTPException(409, "Kode data offline ini sudah dipakai data lain.")
+    return r["server_id"]
+
+
+def log_sync(conn, client_id: str, kind: str, server_id: str, user: dict):
+    conn.execute("INSERT OR IGNORE INTO sync_log (client_id, kind, server_id, user_id, created_at) VALUES (?,?,?,?,?)",
+                 (client_id, kind, server_id, user["id"], time.time()))
+
+
+class SyncPatientBody(PatientBody):
+    client_id: str = Field(min_length=8, max_length=64)
+
+
+@router.post("/api/sync/patient")
+def sync_patient(body: SyncPatientBody, user: dict = Depends(require_role("perawat", "dokter", "admin"))):
+    """Pasien yang didaftarkan offline. NIK yang sudah terdaftar dipakai pasien lama (data lama tidak ditimpa)."""
+    body.check_complete()
+    with db() as conn:
+        pid = synced_id(conn, body.client_id, "patient", user)
+        merged = False
+        if pid is None:
+            old = body.nik and conn.execute("SELECT id FROM patients WHERE nik=?", (body.nik,)).fetchone()
+            merged = bool(old)
+            pid = old["id"] if old else insert_patient(conn, body, user)
+            log_sync(conn, body.client_id, "patient", pid, user)
+        row = conn.execute("SELECT * FROM patients WHERE id=?", (pid,)).fetchone()
+        if row is None:
+            raise HTTPException(410, "Pasien ini sudah dihapus dari server.")
+    return {**patient_dict(row), "merged": merged}
+
+
+class SyncScreeningBody(ScreeningCreate):
+    client_id: str = Field(min_length=8, max_length=64)
+    created_at: float
+
+
+@router.post("/api/sync/screening")
+def sync_screening(body: SyncScreeningBody, user: dict = Depends(require_role("perawat", "dokter", "admin"))):
+    """Membuat draf pemeriksaan offline di server dengan waktu periksa aslinya. Kiriman ulang mengembalikan draf yang sama."""
+    now = time.time()
+    with db() as conn:
+        sid = synced_id(conn, body.client_id, "screening", user)
+        if sid is None:
+            # Jam HP bisa salah; batasi ke 60 hari terakhir dan tidak di masa depan
+            sid = insert_screening(conn, body, user, min(now, max(body.created_at, now - 60 * 86400)))
+            log_sync(conn, body.client_id, "screening", sid, user)
+        s = conn.execute("SELECT * FROM screenings WHERE id=?", (sid,)).fetchone()
+        if s is None:
+            raise HTTPException(410, "Pemeriksaan ini sudah dihapus dari server.")
+        return screening_detail(conn, s, user)
 
 
 @router.get("/api/summary")

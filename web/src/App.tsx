@@ -12,6 +12,7 @@ import {
 import { useAuth } from "./lib/auth";
 import type { Role } from "./lib/api";
 import { BottomNav, Mark, useAsync, type NavItem } from "./components/ui";
+import { OfflineBar } from "./components/OfflineWork";
 import { get } from "./lib/api";
 import Login from "./screens/Login";
 import NurseHome from "./screens/NurseHome";
@@ -71,6 +72,7 @@ function Shell({ role }: { role: Role }) {
   return (
     <div className="app has-sidenav">
       <div className="app-main">
+        <OfflineBar />
         <Outlet />
       </div>
       <BottomNav items={items[role]} />
@@ -81,6 +83,7 @@ function Shell({ role }: { role: Role }) {
 function Bare() {
   return (
     <div className="app">
+      <OfflineBar />
       <Outlet />
     </div>
   );

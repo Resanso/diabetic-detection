@@ -9,6 +9,7 @@ Modul:
 import envfile  # noqa: F401  (muat server/.env sebelum modul lain membaca variabel lingkungan)
 import io
 import json
+import mimetypes
 import os
 import re
 import time
@@ -36,6 +37,7 @@ from inference import (
     LABELS,
     META,
     MODEL_IMG_SIZE,
+    MODEL_PATH,
     PREPROCESS_MODE,
     REF_GRADE,
     REF_PROB,
@@ -66,6 +68,11 @@ app.include_router(billing.router)
 app.include_router(llm.router)
 
 ADMIN = Depends(require_role("admin"))
+
+# Aplikasi web (PWA) memuat ONNX Runtime sebagai modul .mjs + .wasm; browser menolak modul dengan tipe MIME yang salah.
+mimetypes.add_type("text/javascript", ".mjs")
+mimetypes.add_type("application/wasm", ".wasm")
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 
 def calculate_evaluation_metrics(records: list[dict], ref_prob: float = REF_PROB) -> dict:
@@ -186,6 +193,55 @@ def model_info():
         "onnx_test_pred_agreement": META.get("onnx_test_pred_agreement"),
         "quality_thresholds": QC,
     }
+
+
+# Model untuk AI offline di peramban (onnxruntime-web). Model server (ensemble, 465 MB) terlalu besar untuk diunduh HP,
+# jadi bila ada, peramban memakai model kecil terpisah (EfficientNet-B0, 16 MB) di OFFLINE_MODEL_DIR.
+# Hasil offline hanya perkiraan sementara; setelah terkirim, server menilai ulang foto dengan model utamanya.
+OFFLINE_DIR = os.getenv("OFFLINE_MODEL_DIR", os.path.join(os.path.dirname(MODEL_PATH), "b0_backup"))
+if os.path.isfile(os.path.join(OFFLINE_DIR, "dr_model.onnx")):
+    OFFLINE_MODEL = os.path.join(OFFLINE_DIR, "dr_model.onnx")
+    with open(os.path.join(OFFLINE_DIR, "metadata.json")) as _f:
+        OFFLINE_META = json.load(_f)
+elif PREPROCESS_MODE != "ensemble":
+    OFFLINE_MODEL, OFFLINE_META = MODEL_PATH, META
+else:
+    OFFLINE_MODEL, OFFLINE_META = None, {}
+OFFLINE_REF_PROB = float(OFFLINE_META.get("referable_prob_threshold", REF_PROB))
+
+
+def model_version() -> str:
+    st = os.stat(OFFLINE_MODEL)
+    return f"{st.st_size:x}-{int(st.st_mtime):x}-{OFFLINE_REF_PROB:.4f}"
+
+
+@app.get("/api/offline/meta")
+def offline_meta(user: dict = Depends(current_user)):
+    """Yang dibutuhkan HP untuk menjalankan AI dan cek kualitas tanpa sinyal. version berubah saat model diganti."""
+    if OFFLINE_MODEL is None:
+        raise HTTPException(404, "Model AI offline belum tersedia di server.")
+    return {
+        "version": model_version(),
+        "model_url": f"/api/offline/model?v={model_version()}",
+        "model_bytes": os.path.getsize(OFFLINE_MODEL),
+        "labels": OFFLINE_META.get("labels", LABELS),
+        "img_size": OFFLINE_META.get("img_size", 320),
+        "preprocess_mode": OFFLINE_META.get("preprocess_mode", "ben_graham"),
+        "mean": OFFLINE_META.get("mean", [0.485, 0.456, 0.406]),
+        "std": OFFLINE_META.get("std", [0.229, 0.224, 0.225]),
+        "ref_grade": OFFLINE_META.get("referable_threshold_grade", REF_GRADE),
+        "ref_prob": OFFLINE_REF_PROB,
+        "quality_thresholds": QC,
+        "can_see_ai": clinic.can_see_ai(user),
+    }
+
+
+@app.get("/api/offline/model", dependencies=[Depends(current_user)])
+def offline_model():
+    if OFFLINE_MODEL is None:
+        raise HTTPException(404, "Model AI offline belum tersedia di server.")
+    return FileResponse(OFFLINE_MODEL, media_type="application/octet-stream",
+                        headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
 
 @app.get("/api/benchmark/samples", dependencies=[ADMIN])
@@ -524,7 +580,8 @@ def web_app(path: str):
         raise HTTPException(404)
     candidate = os.path.normpath(os.path.join(WEB_DIST, path))
     if path and candidate.startswith(WEB_DIST + os.sep) and os.path.isfile(candidate):
-        return FileResponse(candidate)
+        # File di root build (sw.js, manifest) tidak punya hash di namanya; selalu cek versi terbaru
+        return FileResponse(candidate, headers={"Cache-Control": "no-cache"})
     index = os.path.join(WEB_DIST, "index.html")
     if not os.path.isfile(index):
         raise HTTPException(503, "Aplikasi web belum di-build. Jalankan: cd web && npm install && npm run build")

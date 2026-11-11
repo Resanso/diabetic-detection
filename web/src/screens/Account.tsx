@@ -1,12 +1,49 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { Cpu, Desktop, Flask, Moon, Receipt, SignOut, Sun, Trash } from "@phosphor-icons/react";
+import { Cpu, Desktop, DownloadSimple, Flask, Moon, Receipt, SignOut, Sun, Trash } from "@phosphor-icons/react";
 import { del, get, post, type SatusehatStatus } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { ROLE_LABELS, initials } from "../lib/format";
 import { Banner, ConfirmDelete, Field, Segmented, TopBar, useAsync, useToast } from "../components/ui";
 import { getThemePref, setThemePref, type ThemePref } from "../lib/theme";
 import { PatientProfile } from "../components/PatientProfile";
+import { modelState, onModelState, prepareOffline, type ModelState } from "../lib/offline/ai";
+import { useSync } from "../lib/offline/sync";
+
+const MODEL_TEXT: Record<ModelState, string> = {
+  siap: "AI siap dipakai tanpa sinyal.",
+  mengunduh: "Mengunduh model AI (sekitar 16 MB)...",
+  belum: "Model AI belum diunduh. Buka aplikasi saat ada sinyal.",
+  gagal: "Model AI gagal diunduh. Coba lagi saat sinyal bagus.",
+};
+
+/** Kesiapan bekerja tanpa sinyal: model AI di HP dan data yang belum terkirim. */
+function OfflineStatus() {
+  const [model, setModel] = useState(modelState);
+  useEffect(() => onModelState(() => setModel(modelState())), []);
+  const sync = useSync();
+  return (
+    <section className="formgroup">
+      <h2 className="formgroup__title">Mode offline</h2>
+      <p className="muted">
+        Tanpa sinyal Anda tetap bisa mendaftarkan pasien, mengisi data klinis, memotret retina, dan melihat hasil AI. Semua
+        tersimpan di HP dan dikirim otomatis saat ada sinyal. Jadwal, booking, dan antrean tetap butuh sinyal.
+      </p>
+      <Banner tone={model === "siap" ? "ok" : model === "gagal" ? "danger" : "neutral"}>{MODEL_TEXT[model]}</Banner>
+      <p className="t-caption muted">
+        {sync.pending || sync.drafts
+          ? `${sync.pending} data menunggu dikirim, ${sync.drafts} draf offline.`
+          : "Tidak ada data yang menunggu dikirim."}
+      </p>
+      {(model === "gagal" || model === "belum") && sync.online && (
+        <button className="btn btn--secondary btn--block" onClick={() => prepareOffline()}>
+          <DownloadSimple size={20} />
+          Unduh model AI sekarang
+        </button>
+      )}
+    </section>
+  );
+}
 
 /** Admin: status sambungan SATUSEHAT. Kredensial diatur di server/.env, bukan dari layar ini. */
 function SatusehatSettings() {
@@ -69,6 +106,8 @@ export default function Account() {
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemePref>(getThemePref);
   const [wipe, setWipe] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const { pending, drafts } = useSync();
 
   async function change(e: FormEvent) {
     e.preventDefault();
@@ -195,11 +234,21 @@ export default function Account() {
           </section>
         )}
 
-        <button className="btn btn--danger btn--lg btn--block" onClick={logout}>
+        {user.role !== "pasien" && <OfflineStatus />}
+
+        <button className="btn btn--danger btn--lg btn--block" onClick={() => (pending || drafts ? setConfirmLogout(true) : logout())}>
           <SignOut size={20} />
           Keluar
         </button>
       </main>
+      {confirmLogout && (
+        <ConfirmDelete title="Masih ada data di HP" label="Tetap keluar" onClose={() => setConfirmLogout(false)} onConfirm={logout}>
+          <p>
+            {pending + drafts} pemeriksaan atau pasien belum terkirim ke server. Datanya tetap tersimpan di HP ini dan baru dikirim
+            setelah akun Anda masuk lagi di HP ini.
+          </p>
+        </ConfirmDelete>
+      )}
       {wipe && (
         <ConfirmDelete
           title="Hapus semua data pasien?"

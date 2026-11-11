@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { CaretRight, MagnifyingGlass, Sparkle, UserPlus } from "@phosphor-icons/react";
 import { get, type Patient } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { localPatients, rememberPatients, searchOffline } from "../lib/offline/store";
+import { isNetworkError } from "../lib/offline/sync";
 import { DecisionChip, Empty, SkeletonRows, useAsync, Banner } from "./ui";
 import { GRADE_LABELS, fmtDate, fmtPct, initials, patientMeta } from "../lib/format";
 
@@ -12,7 +15,22 @@ export function PatientSearch({ onPick, onNew }: { onPick: (p: Patient) => void;
     const t = setTimeout(() => setDebounced(q.trim()), 250);
     return () => clearTimeout(t);
   }, [q]);
-  const list = useAsync(() => get<Patient[]>(`/api/patients?q=${encodeURIComponent(debounced)}&limit=50`), [debounced]);
+  const uid = useAuth().user!.id;
+  const [offline, setOffline] = useState(false);
+  const list = useAsync(async () => {
+    try {
+      const found = await get<Patient[]>(`/api/patients?q=${encodeURIComponent(debounced)}&limit=50`);
+      setOffline(false);
+      rememberPatients(found);
+      // Pasien yang didaftarkan offline dan belum terkirim tampil paling atas
+      const local = debounced ? [] : await localPatients(uid).catch(() => []);
+      return [...local, ...found];
+    } catch (e) {
+      if (!isNetworkError(e)) throw e;
+      setOffline(true);
+      return searchOffline(debounced, uid);
+    }
+  }, [debounced, uid]);
 
   return (
     <div className="stack">
@@ -35,6 +53,8 @@ export function PatientSearch({ onPick, onNew }: { onPick: (p: Patient) => void;
         <UserPlus size={20} />
         Pasien baru
       </button>
+
+      {offline && <p className="t-caption muted">Tidak ada sinyal. Mencari di data pasien yang tersimpan di HP.</p>}
 
       {list.loading && !list.data ? (
         <SkeletonRows rows={5} />

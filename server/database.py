@@ -169,6 +169,16 @@ CREATE TABLE IF NOT EXISTS tariffs (
     is_default INTEGER NOT NULL DEFAULT 0,       -- dipakai bila pemeriksaan dibuat tanpa memilih tarif (mis. dari HP)
     created_at REAL NOT NULL
 );
+
+-- Data yang dibuat offline di HP lalu dikirim saat ada sinyal. client_id dibuat HP, jadi kiriman ulang
+-- (sinyal putus di tengah jalan) tidak membuat pasien atau pemeriksaan ganda.
+CREATE TABLE IF NOT EXISTS sync_log (
+    client_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,                    -- patient | screening
+    server_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    created_at REAL NOT NULL
+);
 """
 
 
