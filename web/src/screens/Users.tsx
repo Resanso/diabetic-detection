@@ -66,7 +66,7 @@ function UserSheet({ user, onClose, onSaved }: { user: User | null; onClose: () 
       <div className="stack">
         {error && <Banner tone="danger">{error}</Banner>}
         {!user && (
-          <Field label="Nama pengguna" hint="Huruf kecil tanpa spasi, mis. sari.perawat. Dipakai untuk masuk.">
+          <Field label="Username" hint="Huruf kecil tanpa spasi, mis. sari.perawat. Dipakai untuk masuk.">
             {(p) => <input {...p} className="input" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={username} onChange={(e) => setUsername(e.target.value.trim())} />}
           </Field>
         )}

@@ -89,12 +89,13 @@ _CSP_BASE = ("default-src 'self'; img-src 'self' data: blob:; media-src 'self' b
 
 
 def csp_for(index_html: str | None) -> str:
-    """Izinkan hanya skrip dari situs ini, ditambah skrip sebaris di index.html (pemilih tema) lewat hash-nya."""
+    """Izinkan hanya skrip dari situs ini, ditambah skrip sebaris di index.html (pemilih tema) lewat hash-nya.
+    'wasm-unsafe-eval' hanya membuka kompilasi WebAssembly (AI offline onnxruntime-web), bukan eval JavaScript."""
     hashes = []
     if index_html:
         for body in re.findall(r"<script>(.*?)</script>", index_html, flags=re.S):
             hashes.append("'sha256-" + base64.b64encode(hashlib.sha256(body.encode()).digest()).decode() + "'")
-    return f"script-src 'self' {' '.join(hashes)}; " + _CSP_BASE
+    return f"script-src 'self' 'wasm-unsafe-eval' {' '.join(hashes)}; " + _CSP_BASE
 
 
 def install(app, index_html_path: str):

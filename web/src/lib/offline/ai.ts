@@ -81,7 +81,8 @@ export function prepareOffline(): Promise<void> {
       await call({ type: "warm", meta });
       localStorage.setItem(META_KEY, JSON.stringify(meta));
       setState("siap");
-    } catch {
+    } catch (e) {
+      console.error("[offline-ai] model gagal disiapkan:", e);
       if (!cachedMeta()) setState("gagal");
     } finally {
       preparing = null;

@@ -43,7 +43,7 @@ export default function Login() {
       <p className="muted" style={{ marginBottom: 32 }}>
         {needsSetup
           ? "Belum ada akun di server ini. Akun pertama menjadi admin yang membuat akun perawat dan dokter."
-          : "Petugas masuk dengan nama pengguna. Pasien masuk dengan NIK."}
+          : "Petugas masuk dengan username. Pasien masuk dengan NIK."}
       </p>
 
       <form className="stack" onSubmit={submit} noValidate>
@@ -55,7 +55,7 @@ export default function Login() {
             )}
           </Field>
         )}
-        <Field label={needsSetup ? "Nama pengguna" : "Nama pengguna atau NIK"}>
+        <Field label={needsSetup ? "Username" : "Username atau NIK"}>
           {(p) => (
             <input
               {...p}

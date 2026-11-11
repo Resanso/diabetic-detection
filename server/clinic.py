@@ -121,7 +121,7 @@ def login(body: LoginBody, request: Request, response: Response):
     if not verify_or_dummy(body.password, row["password_hash"] if row else None):
         record_login_failure(username, ip)
         audit("login_gagal", row["id"] if row else None, detail={"akun_ada": row is not None}, status=401)
-        raise HTTPException(401, "Nama pengguna atau kata sandi salah.")
+        raise HTTPException(401, "Username atau kata sandi salah.")
     if not row["active"]:
         raise HTTPException(403, "Akun ini dinonaktifkan. Hubungi admin.")
     clear_login_failures(username, ip)
@@ -221,7 +221,7 @@ def list_users():
 def create_user(body: UserCreate):
     with db() as conn:
         if conn.execute("SELECT 1 FROM users WHERE username=?", (body.username,)).fetchone():
-            raise HTTPException(409, "Nama pengguna sudah dipakai.")
+            raise HTTPException(409, "Username sudah dipakai.")
         cur = conn.execute(
             "INSERT INTO users (username, full_name, role, password_hash, created_at, nik) VALUES (?,?,?,?,?,?)",
             (body.username, body.full_name.strip(), body.role, hash_password(body.password), time.time(), body.nik))

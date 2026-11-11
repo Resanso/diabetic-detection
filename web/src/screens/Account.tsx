@@ -14,7 +14,7 @@ const MODEL_TEXT: Record<ModelState, string> = {
   siap: "AI siap dipakai tanpa sinyal.",
   mengunduh: "Mengunduh model AI (sekitar 16 MB)...",
   belum: "Model AI belum diunduh. Buka aplikasi saat ada sinyal.",
-  gagal: "Model AI gagal diunduh. Coba lagi saat sinyal bagus.",
+  gagal: "Model AI offline belum bisa disiapkan. Coba lagi saat sinyal bagus.",
 };
 
 /** Kesiapan bekerja tanpa sinyal: model AI di HP dan data yang belum terkirim. */
