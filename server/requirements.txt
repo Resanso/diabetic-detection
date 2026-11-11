@@ -1,6 +1,7 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 onnxruntime>=1.17
+onnx>=1.16           # opsional: Fokus AI (CAM); tanpa paket ini server tetap jalan tanpa peta
 opencv-python-headless>=4.8
 numpy>=1.24
 python-multipart>=0.0.9

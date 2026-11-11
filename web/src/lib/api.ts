@@ -11,6 +11,39 @@ export interface User {
   created_at: number;
   last_login: number | null;
   patient_id: string | null;
+  /** NIK tenaga kesehatan, untuk mencari nomor IHS Practitioner di SATUSEHAT */
+  nik: string | null;
+  satusehat_linked: boolean;
+}
+
+export interface SatusehatState {
+  status: "mengirim" | "terkirim" | "gagal" | null;
+  error: string | null;
+  sent_at: number | null;
+  encounter_id: string | null;
+  env: "sandbox" | "production";
+}
+
+/** Deskripsi model bahasa lokal (llama.cpp). Bagian dokter hanya untuk peran yang boleh melihat AI. */
+export interface LlmState {
+  status: "membuat" | "selesai" | "gagal" | null;
+  available: boolean;
+  error?: string | null;
+  at?: number | null;
+  model?: string | null;
+  vision?: boolean | null;
+  mata_kanan?: string | null;
+  mata_kiri?: string | null;
+  ringkasan_dokter?: string | null;
+  penjelasan_pasien?: string | null;
+}
+
+export interface SatusehatStatus {
+  configured: boolean;
+  env: "sandbox" | "production";
+  org_id: string | null;
+  auto: boolean;
+  base_url: string;
 }
 
 export interface Patient {
@@ -64,6 +97,10 @@ export interface RetinaImage {
   preprocessed_url: string;
   heatmap_url: string;
   quality: Quality;
+  /** Fokus AI (CAM): hanya untuk peran yang boleh melihat hasil AI */
+  cam_url?: string | null;
+  /** Derajat yang dijelaskan peta Fokus AI */
+  cam_grade?: number | null;
   eye: Eye | null;
   // Hanya untuk dokter/admin
   grade?: number;
@@ -72,6 +109,33 @@ export interface RetinaImage {
   referable?: boolean;
   p_referable?: number;
   probs?: number[];
+}
+
+export interface Tariff {
+  id: string;
+  name: string;
+  /** Rupiah. 0 = gratis */
+  price: number;
+  description: string | null;
+  active: boolean;
+  is_default: boolean;
+}
+
+export interface Billing {
+  tariff_id: string;
+  name: string;
+  price: number;
+  free: boolean;
+  /** Gratis dianggap lunas */
+  paid: boolean;
+  paid_at: number | null;
+  payer: Payer;
+  /** BPJS: pasien tidak membayar, ditagihkan lewat klaim */
+  covered: boolean;
+  payer_ref?: string | null;
+  patient_id?: string;
+  /** Hasil cek kepesertaan terakhir di SATUSEHAT */
+  coverage: { status: "aktif" | "tidak_ditemukan"; payor: string | null; checked_at: number } | null;
 }
 
 export interface ScreeningSummary {
@@ -105,6 +169,7 @@ export interface ScreeningSummary {
   doctor_name: string | null;
   image_count: number;
   thumbnail_url: string | null;
+  billing: Billing | null;
   patient?: Pick<Patient, "id" | "mrn" | "full_name" | "sex" | "birth_date"> | null;
 }
 
@@ -114,6 +179,9 @@ export interface ScreeningDetail extends ScreeningSummary {
   previous: ScreeningSummary[];
   ref_threshold: number | null;
   labels: string[];
+  /** Hanya untuk dokter/admin bila SATUSEHAT diatur di server */
+  satusehat: SatusehatState | null;
+  llm: LlmState | null;
 }
 
 export interface Device {

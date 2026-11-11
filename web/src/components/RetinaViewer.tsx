@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowsIn } from "@phosphor-icons/react";
 import type { RetinaImage } from "../lib/api";
+import { GRADE_LABELS } from "../lib/format";
 import { Segmented } from "./ui";
 
-type Mode = "asli" | "kontras" | "atensi";
+type Mode = "asli" | "kontras" | "atensi" | "fokus";
 
 /**
  * Penampil foto fundus: cubit/roda untuk memperbesar, geser saat diperbesar, ketuk dua kali untuk 2x.
@@ -20,7 +21,10 @@ export function RetinaViewer({ image, label, modes = true }: { image: RetinaImag
   const pinch = useRef<{ d: number; s: number; cx: number; cy: number; x: number; y: number } | null>(null);
   const lastTap = useRef(0);
 
-  const src = mode === "asli" ? image.image_url : mode === "kontras" ? image.preprocessed_url : image.heatmap_url;
+  const hasCam = !!image.cam_url;
+  const shown: Mode = mode === "fokus" && !hasCam ? "asli" : mode;
+  const src =
+    shown === "asli" ? image.image_url : shown === "kontras" ? image.preprocessed_url : shown === "fokus" ? image.cam_url! : image.heatmap_url;
 
   function apply() {
     const el = img.current;
@@ -144,12 +148,13 @@ export function RetinaViewer({ image, label, modes = true }: { image: RetinaImag
         {modes ? (
           <Segmented
             label="Tampilan foto"
-            value={mode}
+            value={shown}
             onChange={setMode}
             options={[
               { value: "asli", label: "Asli" },
               { value: "kontras", label: "Kontras" },
-              { value: "atensi", label: "Peta lesi" },
+              { value: "atensi", label: "Peta kontras" },
+              ...(hasCam ? [{ value: "fokus" as Mode, label: "Fokus AI" }] : []),
             ]}
           />
         ) : (
@@ -159,6 +164,15 @@ export function RetinaViewer({ image, label, modes = true }: { image: RetinaImag
           <ArrowsIn size={20} />
         </button>
       </div>
+      {modes && (shown === "fokus" || shown === "atensi") && (
+        <p className="viewer__note">
+          {shown === "fokus"
+            ? `Area yang paling mendorong AI ke derajat ${image.cam_grade != null ? GRADE_LABELS[image.cam_grade] : "perkiraannya"}${
+                image.grade === 0 ? " (AI memperkirakan tidak ada DR; peta menunjukkan petunjuk terkuat ke arah DR)" : ""
+              }. Merah paling kuat, relatif dalam foto ini. Petunjuk kasar, bukan letak lesi pasti.`
+            : "Bagian yang lebih gelap dari sekitarnya (pembuluh, titik, perdarahan). Pengolahan gambar biasa, bukan hasil AI."}
+        </p>
+      )}
     </div>
   );
 }

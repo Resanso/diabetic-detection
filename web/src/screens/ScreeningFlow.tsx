@@ -7,12 +7,15 @@ import {
   patch,
   post,
   uploadImage,
+  put,
   type Eye,
   type RetinaImage,
   type ScreeningDetail,
+  type Billing,
+  type Tariff,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { GLUCOSE_KIND, patientMeta } from "../lib/format";
+import { GLUCOSE_KIND, fmtRp, patientMeta } from "../lib/format";
 import { ActionBar, Banner, ConfirmDelete, Field, Segmented, Sheet, TopBar, useToast } from "../components/ui";
 import { PhoneCamera } from "../components/PhoneCamera";
 import { Esp32Capture } from "../components/Esp32Capture";
@@ -99,6 +102,7 @@ export default function ScreeningFlow() {
   const [viewing, setViewing] = useState<RetinaImage | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [dropEye, setDropEye] = useState<Eye | null>(null);
+  const [tariffs, setTariffs] = useState<Tariff[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
   const fileEye = useRef<Eye>("kanan");
 
@@ -121,7 +125,18 @@ export default function ScreeningFlow() {
         });
       })
       .catch((e) => setLoadError(e.message));
+    get<Tariff[]>("/api/tariffs").then(setTariffs).catch(() => undefined);
   }, [id, navigate]);
+
+  async function chooseTariff(tariffId: string) {
+    setError(null);
+    try {
+      const b = await put<Billing>(`/api/screenings/${id}/tariff`, { tariff_id: tariffId });
+      setS((cur) => (cur ? { ...cur, billing: b } : cur));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
 
   const set = <K extends keyof Vitals>(k: K, val: Vitals[K]) => setV((p) => (p ? { ...p, [k]: val } : p));
 
@@ -369,6 +384,26 @@ export default function ScreeningFlow() {
               </Field>
             </section>
 
+            {tariffs.length > 0 && (
+              <section className="formgroup">
+                <Field
+                  label="Biaya pemeriksaan"
+                  hint={s.billing && !s.billing.free ? "Tandai lunas di halaman pemeriksaan setelah pasien membayar." : "Pilih tarif sesuai program atau cara bayar pasien."}
+                >
+                  {(p) => (
+                    <select {...p} className="input" value={s.billing?.tariff_id ?? ""} onChange={(e) => chooseTariff(e.target.value)}>
+                      {!s.billing && <option value="">Pilih tarif</option>}
+                      {tariffs.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}, {fmtRp(t.price)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </Field>
+              </section>
+            )}
+
             <section className="formgroup">
               <Field label="Lokasi pemeriksaan" optional hint="Contoh: Posyandu Melati, Desa Sukamaju. Diingat untuk pemeriksaan berikutnya.">
                 {(p) => <input {...p} className="input" value={v.location} onChange={(e) => set("location", e.target.value)} />}
@@ -493,6 +528,14 @@ export default function ScreeningFlow() {
                 <dd>{s.va_right || s.va_left ? `Kanan ${s.va_right || "-"}, kiri ${s.va_left || "-"}` : "-"}</dd>
                 <dt>Keluhan</dt>
                 <dd style={{ fontWeight: 400 }}>{s.complaints || "-"}</dd>
+                {s.billing && (
+                  <>
+                    <dt>Biaya</dt>
+                    <dd>
+                      {s.billing.name}, {fmtRp(s.billing.price)}
+                    </dd>
+                  </>
+                )}
               </dl>
               <button className="btn btn--ghost" style={{ marginTop: 8, marginLeft: -12 }} onClick={() => goStep(1)}>
                 Ubah data klinis

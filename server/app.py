@@ -6,6 +6,7 @@ Modul:
 - devices.py  ESP32-CAM: polling, perintah foto, pengaturan kamera, unggah JPEG (/api/predict)
 - app.py      endpoint lab untuk admin (benchmark, uji batch, penyetelan ambang), file gambar, dan aplikasi web
 """
+import envfile  # noqa: F401  (muat server/.env sebelum modul lain membaca variabel lingkungan)
 import io
 import json
 import os
@@ -22,8 +23,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import appointments
+import billing
+import llm
 import clinic
 import devices
+import security
+import satusehat
 from auth import current_user, require_role
 from database import BASE, DATA_DIR, IMG_DIR, db, init_db, purge_results
 from inference import (
@@ -34,6 +39,8 @@ from inference import (
     PREPROCESS_MODE,
     REF_GRADE,
     REF_PROB,
+    ensure_cam,
+    infer,
     row_to_dict,
     run_inference,
     session,
@@ -47,10 +54,16 @@ BENCHMARK_MANIFEST = os.path.join(BENCHMARK_DIR, "manifest.json")
 os.makedirs(BENCHMARK_DIR, exist_ok=True)
 init_db()
 
-app = FastAPI(title="Retinova: Skrining Retinopati Diabetik")
+# Dokumentasi API (/docs, /openapi.json) mati di produksi; nyalakan dengan ENABLE_DOCS=1 saat pengembangan.
+_DOCS = os.getenv("ENABLE_DOCS", "0") == "1"
+app = FastAPI(title="Retinova: Skrining Retinopati Diabetik", docs_url="/docs" if _DOCS else None,
+              redoc_url=None, openapi_url="/openapi.json" if _DOCS else None)
 app.include_router(clinic.router)
 app.include_router(devices.router)
 app.include_router(appointments.router)
+app.include_router(satusehat.router)
+app.include_router(billing.router)
+app.include_router(llm.router)
 
 ADMIN = Depends(require_role("admin"))
 
@@ -225,14 +238,7 @@ async def evaluate_benchmark(threshold: float = Query(None)):
                 continue
 
             t0 = time.perf_counter()
-            if PREPROCESS_MODE == "ben_graham":
-                prep = ben_graham(img, MODEL_IMG_SIZE)
-            else:
-                prep = standard_preprocess(img, MODEL_IMG_SIZE)
-
-            x = to_model_input(prep)
-            raw_logits = session.run(None, {INPUT_NAME: x})[0][0]
-            probs = softmax(raw_logits)
+            probs, _, _ = infer(img)
             lat = (time.perf_counter() - t0) * 1000
             latencies.append(lat)
 
@@ -367,14 +373,7 @@ async def evaluate_batch(file: UploadFile = File(...), threshold: float = Form(N
                         continue
 
                     t0 = time.perf_counter()
-                    if PREPROCESS_MODE == "ben_graham":
-                        prep = ben_graham(img, MODEL_IMG_SIZE)
-                    else:
-                        prep = standard_preprocess(img, MODEL_IMG_SIZE)
-
-                    x = to_model_input(prep)
-                    raw_logits = session.run(None, {INPUT_NAME: x})[0][0]
-                    probs = softmax(raw_logits)
+                    probs, _, _ = infer(img)
                     lat = (time.perf_counter() - t0) * 1000
                     latencies.append(lat)
 
@@ -486,14 +485,24 @@ def health():
     }
 
 
-@app.get("/images/{name}", dependencies=[Depends(current_user)])
-def image(name: str):
-    if not re.fullmatch(r"[0-9a-f]{12}(_prep|_heat)?\.(jpg|png)", name):
+@app.get("/images/{name}")
+def image(name: str, user: dict = Depends(current_user)):
+    m = re.fullmatch(r"([0-9a-f]{12})(_prep|_heat|_cam)?\.(jpg|png)", name)
+    if not m:
         raise HTTPException(404)
+    if m.group(2) == "_cam":
+        # Fokus AI membuka perkiraan AI: hanya untuk peran yang boleh melihat hasil AI
+        if not clinic.can_see_ai(user):
+            raise HTTPException(404)
+        with db() as conn:
+            r = conn.execute("SELECT filename, probs FROM results WHERE id=?", (m.group(1),)).fetchone()
+        if r is None or not ensure_cam(m.group(1), r["filename"], json.loads(r["probs"])):
+            raise HTTPException(404)
     path = os.path.join(IMG_DIR, name)
     if not os.path.isfile(path):
         raise HTTPException(404)
-    return FileResponse(path, headers={"Cache-Control": "private, max-age=86400"})
+    # Foto retina adalah data kesehatan: jangan disimpan di cache browser/proksi.
+    return FileResponse(path, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/lab", dependencies=[ADMIN])
@@ -503,6 +512,7 @@ def lab_dashboard():
 
 
 WEB_DIST = os.getenv("WEB_DIST", os.path.join(BASE, "static", "app"))
+security.install(app, os.path.join(WEB_DIST, "index.html"))
 if os.path.isdir(os.path.join(WEB_DIST, "assets")):
     app.mount("/assets", StaticFiles(directory=os.path.join(WEB_DIST, "assets")), name="assets")
 

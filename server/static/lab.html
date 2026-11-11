@@ -1713,12 +1713,12 @@
     } else if (d.referable) {
       banner.className = 'verdict-banner ref-yes';
       vTitle.textContent = 'PERHATIAN: PERLU RUJUKAN DOKTER MATA';
-      vDesc.textContent = `Peluang rujukan ${(d.p_referable * 100).toFixed(1)}% melewati ambang batas. Memerlukan tindakan klinis.`;
+      vDesc.textContent = `Peluang derajat sedang ke atas ${(d.p_referable * 100).toFixed(1)}% (Sedang ${(d.probs[2] * 100).toFixed(1)}% + Berat ${(d.probs[3] * 100).toFixed(1)}% + Proliferatif ${(d.probs[4] * 100).toFixed(1)}%), di atas ambang rujukan ${(d.ref_threshold * 100).toFixed(1)}%.`;
       vIcon.textContent = '!';
     } else {
       banner.className = 'verdict-banner ref-no';
       vTitle.textContent = 'AMAN: TIDAK PERLU RUJUKAN SEGERA';
-      vDesc.textContent = `Kondisi retina ${d.label.toLowerCase()}. Skrining rutin disarankan secara berkala.`;
+      vDesc.textContent = `Perkiraan derajat: ${d.label}. Peluang derajat sedang ke atas ${(d.p_referable * 100).toFixed(1)}% (Sedang ${(d.probs[2] * 100).toFixed(1)}% + Berat ${(d.probs[3] * 100).toFixed(1)}% + Proliferatif ${(d.probs[4] * 100).toFixed(1)}%), di bawah ambang rujukan ${(d.ref_threshold * 100).toFixed(1)}%.` + (Math.abs(d.p_referable - d.ref_threshold) <= 0.1 ? ' ⚠ Mendekati ambang: periksa eksudat dan perdarahan di sekitar makula.' : ' Skrining rutin disarankan secara berkala.');
       vIcon.textContent = '✓';
     }
 

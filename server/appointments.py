@@ -6,7 +6,7 @@ yang mendaftarkan), dan dokter memanggil nomor berikutnya dari layar antrean.
 Semua tanggal dan jam memakai zona waktu klinik (CLINIC_TZ, bawaan Asia/Jakarta).
 """
 import datetime as dt
-import ipaddress
+import hashlib
 import os
 import secrets
 import sqlite3
@@ -19,7 +19,8 @@ from pydantic import BaseModel, Field, field_validator
 
 import bpjs
 from auth import any_user, create_session, current_user, hash_password, public_user, require_patient
-from clinic import PayerFields, clean, new_id, next_mrn, reset_bpjs_if_changed, set_session_cookie
+from clinic import CONSENT_VERSION, PayerFields, clean, new_id, next_mrn, reset_bpjs_if_changed, set_session_cookie
+from security import client_ip
 from database import db
 
 router = APIRouter()
@@ -125,15 +126,8 @@ _REG: dict[str, list[float]] = {}
 
 
 def limit_registrations(request: Request):
-    """Maksimal 5 pendaftaran per alamat IP per jam (di memori)."""
-    ip = request.client.host if request.client else "?"
-    try:
-        # X-Real-IP dari nginx hanya dipercaya bila permintaan datang dari jaringan lokal (nginx/docker),
-        # bukan dari internet langsung ke port 8000
-        if ipaddress.ip_address(ip).is_private or ipaddress.ip_address(ip).is_loopback:
-            ip = request.headers.get("x-real-ip") or ip
-    except ValueError:
-        pass
+    """Maksimal 5 pendaftaran per alamat IP per jam (di memori). IP dari nginx hanya dipercaya dari TRUSTED_PROXIES."""
+    ip = client_ip(request)
     now = time.time()
     hits = [t for t in _REG.get(ip, []) if now - t < 3600]
     if len(hits) >= 5:
@@ -147,7 +141,9 @@ class RegisterBody(PayerFields):
     birth_date: str
     sex: str
     phone: str = Field(min_length=8, max_length=20)
-    password: str = Field(min_length=8, max_length=200)
+    password: str = Field(min_length=10, max_length=200)
+    activation_code: str | None = Field(None, max_length=20)
+    consent: bool = False
 
     @field_validator("nik")
     @classmethod
@@ -179,6 +175,8 @@ def register_patient(body: RegisterBody, request: Request, response: Response):
     Bila NIK sudah tercatat oleh petugas, akun dihubungkan ke data itu asalkan tanggal lahirnya sama."""
     if not body.payer:
         raise HTTPException(422, "Pilih cara bayar.")
+    if not body.consent:
+        raise HTTPException(422, "Setujui pemrosesan data kesehatan Anda untuk mendaftar.")
     body.check_complete()
     limit_registrations(request)
     now = time.time()
@@ -187,9 +185,16 @@ def register_patient(body: RegisterBody, request: Request, response: Response):
             raise HTTPException(409, "NIK ini sudah punya akun. Silakan masuk, atau hubungi petugas bila lupa kata sandi.")
         p = conn.execute("SELECT * FROM patients WHERE nik=?", (body.nik,)).fetchone()
         if p is not None:
-            if p["birth_date"] and p["birth_date"] != body.birth_date:
-                raise HTTPException(409, "NIK ini sudah tercatat di klinik dengan data berbeda. Hubungi petugas.")
+            # Data yang sudah dicatat petugas hanya bisa dihubungkan dengan kode aktivasi dari petugas.
+            # Tanggal lahir saja tidak cukup: tanggal lahir terbaca dari digit NIK.
+            code = (body.activation_code or "").strip().upper()
+            ok = (code and p["activation_hash"] and (p["activation_expires"] or 0) > now
+                  and secrets.compare_digest(hashlib.sha256(code.encode()).hexdigest(), p["activation_hash"]))
+            if not ok:
+                raise HTTPException(409, "NIK ini sudah tercatat di klinik. Minta kode aktivasi ke petugas, lalu isi"
+                                         " kode itu saat mendaftar.")
             pid = p["id"]
+            conn.execute("UPDATE patients SET activation_hash=NULL, activation_expires=NULL WHERE id=?", (pid,))
             # Lengkapi yang kosong saja; data dari petugas tidak ditimpa
             conn.execute(
                 "UPDATE patients SET birth_date=COALESCE(birth_date, ?), sex=COALESCE(sex, ?), phone=COALESCE(phone, ?),"
@@ -204,6 +209,8 @@ def register_patient(body: RegisterBody, request: Request, response: Response):
                 " policy_no, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (pid, next_mrn(conn), body.nik, body.full_name.strip(), body.sex, body.birth_date, body.phone.strip(),
                  body.payer, body.bpjs_no, clean(body.insurer), clean(body.policy_no), now, now))
+        conn.execute("UPDATE patients SET consent_at=COALESCE(consent_at, ?), consent_version=COALESCE(consent_version, ?)"
+                     " WHERE id=?", (now, CONSENT_VERSION, pid))
         cur = conn.execute(
             "INSERT INTO users (username, full_name, role, password_hash, created_at, patient_id) VALUES (?,?,?,?,?,?)",
             (body.nik, body.full_name.strip(), "pasien", hash_password(body.password), now, pid))
@@ -271,9 +278,20 @@ def verify_bpjs(patient_id: str) -> dict:
     return {"status": status, **r}
 
 
+_BPJS_CHECKS: dict[int, list[float]] = {}
+
+
 @router.post("/api/me/bpjs-check")
 async def check_my_bpjs(user: dict = Depends(require_patient)):
-    return await run_in_threadpool(verify_bpjs, user["patient_id"])
+    """Pasien hanya mendapat status aktif/tidak, bukan nama atau faskes pemegang kartu (nomor kartu bisa diketik
+    siapa saja), dan dibatasi 3 kali per jam."""
+    now = time.time()
+    hits = [t for t in _BPJS_CHECKS.get(user["id"], []) if now - t < 3600]
+    if len(hits) >= 3:
+        raise HTTPException(429, "Cek kepesertaan dibatasi 3 kali per jam.")
+    _BPJS_CHECKS[user["id"]] = [*hits, now]
+    r = await run_in_threadpool(verify_bpjs, user["patient_id"])
+    return {"status": r["status"], "active": r["active"], "status_text": r.get("status_text")}
 
 
 @router.post("/api/patients/{patient_id}/bpjs-check", dependencies=[Depends(current_user)])

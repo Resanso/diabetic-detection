@@ -59,6 +59,8 @@ export default function PatientForm() {
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((prev) => ({ ...prev, [k]: v }));
   const [payer, setPayer] = useState<PayerValue>(payerFrom(null));
   const [payerErr, setPayerErr] = useState<Partial<Record<keyof PayerValue, string>>>({});
+  const [consent, setConsent] = useState(false);
+  const [consentErr, setConsentErr] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -86,6 +88,8 @@ export default function PatientForm() {
     const pe = payerErrors(payer, false);
     setErrors(v);
     setPayerErr(pe);
+    setConsentErr(!id && !consent);
+    if (!id && !consent && !Object.keys(v).length) return;
     if (Object.keys(pe).length && !Object.keys(v).length) return;
     if (Object.keys(v).length) {
       document.getElementById(`f-${Object.keys(v)[0]}`)?.focus();
@@ -93,7 +97,7 @@ export default function PatientForm() {
     }
     setBusy(true);
     setServerError(null);
-    const body = { ...f, ...payerBody(payer), diabetes_since: f.diabetes_since ? Number(f.diabetes_since) : null, nik: f.nik || null };
+    const body = { ...f, ...payerBody(payer), diabetes_since: f.diabetes_since ? Number(f.diabetes_since) : null, nik: f.nik || null, ...(consent ? { consent: true } : {}) };
     try {
       const saved = id ? await put<Patient>(`/api/patients/${id}`, body) : await post<Patient>("/api/patients", body);
       toast(id ? "Data pasien disimpan" : `Pasien terdaftar dengan nomor ${saved.mrn}`);
@@ -176,6 +180,20 @@ export default function PatientForm() {
               {(p) => <textarea {...p} className="input" value={f.notes} onChange={(e) => set("notes", e.target.value)} />}
             </Field>
           </section>
+
+          {!id && (
+            <section className="formgroup">
+              <h2 className="formgroup__title">Persetujuan pasien</h2>
+              <label className="consent">
+                <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+                <span>
+                  Pasien sudah dijelaskan dan setuju data pribadi serta foto retinanya diproses untuk skrining, dibaca
+                  dokter dengan bantuan AI, dan dikirim ke SATUSEHAT Kemenkes.
+                </span>
+              </label>
+              {consentErr && <p className="field__error t-caption" role="alert">Centang persetujuan pasien sebelum menyimpan.</p>}
+            </section>
+          )}
         </form>
       </main>
       <ActionBar>

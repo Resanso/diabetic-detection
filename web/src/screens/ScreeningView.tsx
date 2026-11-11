@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Camera, CaretRight, Clock, PencilSimple, Trash } from "@phosphor-icons/react";
-import { del, get, post, type Decision, type Eye, type ScreeningDetail } from "../lib/api";
+import { ArrowsClockwise, Camera, CaretRight, ChatText, Clock, PencilSimple, Trash } from "@phosphor-icons/react";
+import { del, get, post, type Billing, type Decision, type Eye, type LlmState, type SatusehatState, type ScreeningDetail } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import {
   DECISIONS,
@@ -13,6 +13,7 @@ import {
   fmtDate,
   fmtDateTime,
   fmtNum,
+  fmtRp,
   fmtWaiting,
 } from "../lib/format";
 import { ActionBar, Banner, ConfirmDelete, DecisionChip, Field, GradeChip, Segmented, StatusChip, TopBar, useToast } from "../components/ui";
@@ -147,6 +148,277 @@ function DoctorResult({ s }: { s: ScreeningDetail }) {
   );
 }
 
+/** Deskripsi dari model bahasa lokal: temuan visual dan ringkasan untuk dokter, penjelasan awam setelah dibaca. */
+function LlmCard({ s, forDoctor, onChange }: { s: ScreeningDetail; forDoctor: boolean; onChange: (l: LlmState) => void }) {
+  const l = s.llm;
+  const [error, setError] = useState<string | null>(null);
+  const making = l?.status === "membuat";
+
+  useEffect(() => {
+    if (!making) return;
+    const t = setInterval(() => {
+      get<ScreeningDetail>(`/api/screenings/${s.id}`)
+        .then((d) => d.llm && d.llm.status !== "membuat" && onChange(d.llm))
+        .catch(() => undefined);
+    }, 3000);
+    return () => clearInterval(t);
+  }, [making, s.id, onChange]);
+
+  if (!l || s.status === "draf") return null;
+  const hasDoctor = forDoctor && (l.ringkasan_dokter || l.mata_kanan || l.mata_kiri);
+  const canMake = l.available && (forDoctor || s.status === "dibaca");
+  if (!hasDoctor && !l.penjelasan_pasien && !making && !canMake && !l.error) return null;
+
+  async function make() {
+    setError(null);
+    try {
+      await post(`/api/screenings/${s.id}/llm`);
+      onChange({ ...l!, status: "membuat", error: null });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  return (
+    <section className="card stack-sm" aria-label="Deskripsi">
+      <div className="section-head" style={{ margin: 0 }}>
+        <h2 style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <ChatText size={18} />
+          Deskripsi
+        </h2>
+        {making && <span className="chip chip--menunggu">Sedang ditulis</span>}
+      </div>
+      {l.penjelasan_pasien && (
+        <div className="stack-sm">
+          <p className="t-label">Untuk pasien</p>
+          <p>{l.penjelasan_pasien}</p>
+        </div>
+      )}
+      {hasDoctor && (
+        <dl className="kv">
+          {l.ringkasan_dokter && (
+            <>
+              <dt>Ringkasan</dt>
+              <dd style={{ fontWeight: 400 }}>{l.ringkasan_dokter}</dd>
+            </>
+          )}
+          {l.vision && l.mata_kanan && (
+            <>
+              <dt>Foto mata kanan</dt>
+              <dd style={{ fontWeight: 400 }}>{l.mata_kanan}</dd>
+            </>
+          )}
+          {l.vision && l.mata_kiri && (
+            <>
+              <dt>Foto mata kiri</dt>
+              <dd style={{ fontWeight: 400 }}>{l.mata_kiri}</dd>
+            </>
+          )}
+        </dl>
+      )}
+      {!making && !hasDoctor && !l.penjelasan_pasien && !l.error && (
+        <p className="muted">{s.status === "dibaca" || forDoctor ? "Belum ada deskripsi untuk pemeriksaan ini." : "Penjelasan untuk pasien dibuat setelah dokter membaca."}</p>
+      )}
+      {making && <p className="muted">Model bahasa di server sedang membaca foto dan data. Biasanya kurang dari 1 menit.</p>}
+      {l.status === "gagal" && l.error && <Banner tone="danger">{l.error}</Banner>}
+      {error && <Banner tone="danger">{error}</Banner>}
+      {(hasDoctor || l.penjelasan_pasien) && (
+        <p className="t-caption">
+          Ditulis model bahasa{l.model ? ` (${l.model.replace(/\.gguf$/, "")})` : ""} di server klinik. Bisa keliru, terutama membaca lesi kecil dari foto. Derajat dan keputusan resmi tetap dari dokter.
+        </p>
+      )}
+      {canMake && !making && (
+        <button className="btn btn--ghost btn--block" onClick={make}>
+          <ArrowsClockwise size={18} />
+          {hasDoctor || l.penjelasan_pasien ? "Tulis ulang" : "Buat deskripsi"}
+        </button>
+      )}
+    </section>
+  );
+}
+
+/** Biaya pemeriksaan dan tanda lunas. Perawat atau admin menandai lunas setelah pasien membayar. */
+function BillingCard({ s, canPay, onChange }: { s: ScreeningDetail; canPay: boolean; onChange: (b: Billing) => void }) {
+  const b = s.billing;
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!b) return null;
+  const insured = b.payer === "bpjs" || b.payer === "asuransi";
+  const notFound = b.coverage?.status === "tidak_ditemukan";
+  const payerName = b.payer === "bpjs" ? "BPJS Kesehatan" : b.payer === "asuransi" ? "Asuransi" : "Bayar sendiri";
+
+  async function checkCoverage() {
+    setChecking(true);
+    setError(null);
+    try {
+      const c = await post<{ status: "aktif" | "tidak_ditemukan"; payor: string | null; checked_at: number }>(`/api/patients/${b!.patient_id}/satusehat-coverage`);
+      onChange({ ...b!, coverage: c });
+      toast(c.status === "aktif" ? "Kepesertaan ditemukan di SATUSEHAT" : "Kepesertaan tidak ditemukan di SATUSEHAT");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function setPaid(paid: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      onChange(await post<Billing>(`/api/screenings/${s.id}/payment`, { paid }));
+      toast(paid ? "Ditandai lunas" : "Tanda lunas dibatalkan");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card stack-sm" aria-label="Biaya">
+      <div className="section-head" style={{ margin: 0 }}>
+        <h2>Biaya</h2>
+        <span className={`chip ${b.free ? "chip--draf" : notFound ? "chip--g2" : b.covered ? "chip--menunggu" : b.paid ? "chip--g0" : "chip--g2"}`}>
+          {b.free ? "Gratis" : b.covered ? (notFound ? "Kepesertaan bermasalah" : "Ditanggung BPJS") : b.paid ? (b.payer === "asuransi" ? "Dibayar asuransi" : "Lunas") : "Belum dibayar"}
+        </span>
+      </div>
+      <dl className="kv">
+        <dt>Tarif</dt>
+        <dd>{b.name}</dd>
+        <dt>Jumlah</dt>
+        <dd className="num">{fmtRp(b.price)}</dd>
+        <dt>Cara bayar</dt>
+        <dd>
+          {payerName}
+          {b.payer_ref && <span className="mono">, {b.payer_ref}</span>}
+        </dd>
+        {insured && (
+          <>
+            <dt>Kepesertaan</dt>
+            <dd style={{ fontWeight: 400 }}>
+              {!b.coverage
+                ? "Belum dicek di SATUSEHAT"
+                : b.coverage.status === "aktif"
+                  ? `Aktif di SATUSEHAT${b.coverage.payor ? ` (${b.coverage.payor})` : ""}, dicek ${fmtDateTime(b.coverage.checked_at)}`
+                  : `Tidak ditemukan di SATUSEHAT, dicek ${fmtDateTime(b.coverage.checked_at)}`}
+            </dd>
+          </>
+        )}
+        {b.paid_at && (
+          <>
+            <dt>Dibayar</dt>
+            <dd style={{ fontWeight: 400 }}>{fmtDateTime(b.paid_at)}</dd>
+          </>
+        )}
+      </dl>
+      {b.coverage?.status === "tidak_ditemukan" && (
+        <Banner tone="warn">
+          Nomor {b.payer === "bpjs" ? "kartu BPJS" : "polis"} ini tidak terdaftar di SATUSEHAT. Periksa nomornya di data pasien, atau ganti cara bayar menjadi bayar sendiri.
+        </Banner>
+      )}
+      {b.covered && !notFound && (
+        <p className="t-caption">
+          Pasien tidak membayar di klinik. {s.status === "dibaca" ? "Tagihan dikirim" : "Setelah dokter membaca, tagihan dikirim"} ke SATUSEHAT berstatus menunggu klaim.
+        </p>
+      )}
+      {error && <Banner tone="danger">{error}</Banner>}
+      {insured && b.patient_id && (
+        <button className="btn btn--ghost btn--block" disabled={checking} onClick={checkCoverage}>
+          <ArrowsClockwise size={18} />
+          {checking ? "Mengecek ke SATUSEHAT..." : "Cek kepesertaan di SATUSEHAT"}
+        </button>
+      )}
+      {canPay && !b.free && !b.covered && (
+        <button className={`btn btn--block ${b.paid ? "btn--ghost" : "btn--secondary"}`} disabled={busy} onClick={() => setPaid(!b.paid)}>
+          {busy ? "Menyimpan..." : b.paid ? (b.payer === "asuransi" ? "Batalkan tanda dibayar" : "Batalkan tanda lunas") : b.payer === "asuransi" ? "Tandai dibayar asuransi" : "Tandai lunas"}
+        </button>
+      )}
+    </section>
+  );
+}
+
+/** Status kirim ke SATUSEHAT (Kemenkes). Bacaan dokter dikirim otomatis; tombol untuk kirim ulang bila gagal. */
+function SatusehatCard({ s, canSend, onChange }: { s: ScreeningDetail; canSend: boolean; onChange: (st: SatusehatState) => void }) {
+  const st = s.satusehat;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const sending = busy || st?.status === "mengirim";
+
+  useEffect(() => {
+    if (st?.status !== "mengirim") return;
+    const t = setInterval(() => {
+      get<ScreeningDetail>(`/api/screenings/${s.id}`)
+        .then((d) => d.satusehat && d.satusehat.status !== "mengirim" && onChange(d.satusehat))
+        .catch(() => undefined);
+    }, 2000);
+    return () => clearInterval(t);
+  }, [st?.status, s.id, onChange]);
+
+  if (!st) return null;
+  const env0 = st.env === "sandbox" ? " (sandbox)" : "";
+  if (s.status !== "dibaca") {
+    return (
+      <section className="card stack-sm" aria-label="SATUSEHAT">
+        <div className="section-head" style={{ margin: 0 }}>
+          <h2>SATUSEHAT{env0}</h2>
+          <span className="chip chip--draf">Menunggu bacaan dokter</span>
+        </div>
+        <p className="muted">
+          Data dikirim ke SATUSEHAT setelah dokter menyimpan bacaan: kunjungan, tanda vital, gula darah, hasil pemeriksaan mata, diagnosis
+          {s.billing ? ", dan tagihan" : ""}. Pasien harus punya NIK.
+        </p>
+      </section>
+    );
+  }
+
+  async function send() {
+    setBusy(true);
+    setError(null);
+    try {
+      onChange(await post<SatusehatState>(`/api/screenings/${s.id}/satusehat`));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const env = st.env === "sandbox" ? " (sandbox)" : "";
+  return (
+    <section className="card stack-sm" aria-label="SATUSEHAT">
+      <div className="section-head" style={{ margin: 0 }}>
+        <h2>SATUSEHAT{env}</h2>
+        <span className={`chip ${st.status === "terkirim" ? "chip--g0" : st.status === "gagal" ? "chip--g3" : "chip--menunggu"}`}>
+          {sending ? "Mengirim" : st.status === "terkirim" ? "Terkirim" : st.status === "gagal" ? "Gagal" : "Belum dikirim"}
+        </span>
+      </div>
+      {st.status === "terkirim" && (
+        <p className="muted">
+          Kunjungan, tanda vital, gula darah, hasil pemeriksaan mata, diagnosis{s.billing ? ", dan tagihan" : ""} tercatat {fmtDateTime(st.sent_at)}.
+          {st.encounter_id && (
+            <>
+              {" "}
+              ID kunjungan <span className="mono">{st.encounter_id}</span>.
+            </>
+          )}
+        </p>
+      )}
+      {st.status === "gagal" && st.error && <Banner tone="danger">{st.error}</Banner>}
+      {error && <Banner tone="danger">{error}</Banner>}
+      {!sending && st.status !== "terkirim" && !st.error && <p className="muted">Bacaan ini belum dikirim ke SATUSEHAT.</p>}
+      {!sending && !canSend && st.status !== "terkirim" && <p className="t-caption">Pengiriman dilakukan oleh dokter atau admin.</p>}
+      {!sending && canSend && (
+        <button className="btn btn--secondary btn--block" onClick={send}>
+          <ArrowsClockwise size={18} />
+          {st.status === "terkirim" ? "Kirim ulang" : st.status === "gagal" ? "Coba kirim lagi" : "Kirim ke SATUSEHAT"}
+        </button>
+      )}
+    </section>
+  );
+}
+
 export default function ScreeningView() {
   const { id } = useParams();
   const { user } = useAuth();
@@ -192,6 +464,9 @@ export default function ScreeningView() {
 
   const images = useMemo(() => (s ? s.images.filter((i) => i.eye === eye) : []), [s, eye]);
   const image = images.find((i) => i.id === imgId) ?? images[images.length - 1];
+  const onLlm = useCallback((l: LlmState) => setS((cur) => (cur ? { ...cur, llm: l } : cur)), []);
+  const onBilling = useCallback((b: Billing) => setS((cur) => (cur ? { ...cur, billing: b } : cur)), []);
+  const onSatusehat = useCallback((st: SatusehatState) => setS((cur) => (cur ? { ...cur, satusehat: st } : cur)), []);
   const isDoctor = user?.role === "dokter";
   const reviewing = isDoctor && s && (s.status === "menunggu" || editing);
 
@@ -318,8 +593,11 @@ export default function ScreeningView() {
 
           <div className="review__side stack">
             <ClinicalSummary s={s} />
+            <LlmCard s={s} forDoctor={isDoctor || user?.role === "admin"} onChange={onLlm} />
+            {!reviewing && <BillingCard s={s} canPay={user?.role === "perawat" || user?.role === "admin"} onChange={onBilling} />}
 
             {isDoctor && !reviewing && <DoctorResult s={s} />}
+            {!reviewing && <SatusehatCard s={s} canSend={isDoctor || user?.role === "admin"} onChange={onSatusehat} />}
 
             {reviewing && (
               <section className="formgroup" aria-label="Bacaan dokter">

@@ -7,12 +7,13 @@ import { isoDate } from "../lib/format";
 import { Banner, Field, Logo, Segmented } from "../components/ui";
 import { PayerFields, payerBody, payerErrors, type PayerValue } from "../components/PayerFields";
 
-type Errors = Partial<Record<"nik" | "full_name" | "birth_date" | "sex" | "phone" | "password" | keyof PayerValue, string>>;
+type Errors = Partial<Record<"nik" | "full_name" | "birth_date" | "sex" | "phone" | "password" | "consent" | keyof PayerValue, string>>;
 
 /** Pendaftaran akun pasien. NIK menjadi nama pengguna untuk masuk berikutnya. */
 export default function Register() {
   const { refresh } = useAuth();
-  const [f, setF] = useState({ nik: "", full_name: "", birth_date: "", sex: null as "L" | "P" | null, phone: "", password: "" });
+  const [f, setF] = useState({ nik: "", full_name: "", birth_date: "", sex: null as "L" | "P" | null, phone: "", password: "", activation_code: "" });
+  const [consent, setConsent] = useState(false);
   const [payer, setPayer] = useState<PayerValue>({ payer: null, bpjs_no: "", insurer: "", policy_no: "" });
   const [show, setShow] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
@@ -27,7 +28,8 @@ export default function Register() {
     if (!f.birth_date) e.birth_date = "Isi tanggal lahir.";
     if (!f.sex) e.sex = "Pilih jenis kelamin.";
     if (f.phone.replace(/\D/g, "").length < 8) e.phone = "Isi nomor HP aktif.";
-    if (f.password.length < 8) e.password = "Minimal 8 karakter.";
+    if (f.password.length < 10) e.password = "Minimal 10 karakter.";
+    if (!consent) e.consent = "Centang persetujuan untuk mendaftar.";
     return e;
   }
 
@@ -42,7 +44,7 @@ export default function Register() {
     setBusy(true);
     setError(null);
     try {
-      await post("/api/auth/register", { ...f, full_name: f.full_name.trim(), ...payerBody(payer) });
+      await post("/api/auth/register", { ...f, full_name: f.full_name.trim(), activation_code: f.activation_code.trim() || null, consent, ...payerBody(payer) });
       await refresh();
     } catch (err) {
       setError((err as Error).message);
@@ -94,7 +96,7 @@ export default function Register() {
           {(p) => <input {...p} className="input num" type="tel" inputMode="tel" autoComplete="tel" value={f.phone} onChange={(e) => set("phone", e.target.value)} />}
         </Field>
         <PayerFields value={payer} onChange={setPayer} errors={errors} />
-        <Field label="Kata sandi" id="r-password" error={errors.password} hint="Minimal 8 karakter.">
+        <Field label="Kata sandi" id="r-password" error={errors.password} hint="Minimal 10 karakter.">
           {(p) => (
             <div className="input-wrap">
               <input {...p} className="input" type={show ? "text" : "password"} autoComplete="new-password" value={f.password} onChange={(e) => set("password", e.target.value)} />
@@ -104,6 +106,18 @@ export default function Register() {
             </div>
           )}
         </Field>
+        <Field label="Kode aktivasi (jika ada)" id="r-code" hint="Hanya jika Anda sudah pernah diperiksa di klinik. Minta kode ke petugas.">
+          {(p) => <input {...p} className="input mono" autoComplete="off" maxLength={8} value={f.activation_code} onChange={(e) => set("activation_code", e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))} />}
+        </Field>
+        <label className="consent">
+          <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+          <span>
+            Saya setuju klinik memproses data pribadi dan foto retina saya untuk skrining retinopati diabetik, dibaca
+            dokter dengan bantuan AI, dan dikirim ke SATUSEHAT Kemenkes sesuai aturan rekam medis. Saya bisa meminta
+            salinan, perbaikan, atau penghapusan data lewat petugas.
+          </span>
+        </label>
+        {errors.consent && <p className="field__error t-caption" role="alert">{errors.consent}</p>}
         <button className="btn btn--primary btn--lg btn--block" disabled={busy}>
           {busy ? "Mendaftarkan..." : "Daftar"}
         </button>

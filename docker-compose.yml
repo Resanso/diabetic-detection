@@ -12,7 +12,7 @@ services:
       - PORT=8000
       - REF_PROB=${REF_PROB:-}                      # ambang rujukan; kosong = pakai ambang hasil training di metadata.json
       - DEVICE_KEY=${DEVICE_KEY:-}                  # kunci ESP32 (header X-API-Key). Wajib diisi di produksi.
-      - COOKIE_SECURE=${COOKIE_SECURE:-0}           # 1 jika diakses lewat HTTPS
+      - COOKIE_SECURE=${COOKIE_SECURE:-1}           # 0 hanya untuk uji lokal tanpa HTTPS
       - SHOW_AI_TO_NURSE=${SHOW_AI_TO_NURSE:-0}     # 1 = perawat juga melihat perkiraan AI
       - CLINIC_TZ=${CLINIC_TZ:-Asia/Jakarta}        # zona waktu jadwal dan antrean
       - BOOK_DAYS=${BOOK_DAYS:-14}                  # booking paling jauh N hari ke depan

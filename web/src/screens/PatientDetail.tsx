@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Camera, PencilSimple, ClockCounterClockwise, Trash } from "@phosphor-icons/react";
-import { del, get, type Patient, type ScreeningSummary } from "../lib/api";
+import { Camera, PencilSimple, ClockCounterClockwise, Key, Trash } from "@phosphor-icons/react";
+import { del, get, post, type Patient, type ScreeningSummary } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { ageOf, cap, DIABETES_LABELS, PAYER_LABELS, fmtDate, fmtWhen } from "../lib/format";
 import { ActionBar, Banner, ConfirmDelete, Empty, SkeletonRows, TopBar, useAsync, useToast } from "../components/ui";
@@ -21,6 +21,17 @@ export default function PatientDetail() {
   const navigate = useNavigate();
   const toast = useToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [code, setCode] = useState<{ code: string; expires_in_hours: number } | null>(null);
+  const [codeError, setCodeError] = useState<string | null>(null);
+  const canIssueCode = user?.role === "admin" || user?.role === "perawat";
+  async function issueCode() {
+    setCodeError(null);
+    try {
+      setCode(await post<{ code: string; expires_in_hours: number }>(`/api/patients/${id}/activation-code`));
+    } catch (err) {
+      setCodeError((err as Error).message);
+    }
+  }
   const canScreen = !!user;
   // Admin selalu boleh; pendaftar hanya selama belum ada pemeriksaan yang dikirim (server memeriksa ulang)
   const canDelete = !!p && (user?.role === "admin" || (p.created_by === user?.id && p.screenings.every((s) => s.status === "draf")));
@@ -109,6 +120,28 @@ export default function PatientDetail() {
                 <Empty icon={ClockCounterClockwise}>Pasien ini belum pernah diperiksa.</Empty>
               )}
             </section>
+
+            {canIssueCode && (
+              <section className="formgroup">
+                <h2 className="formgroup__title">Akun pasien</h2>
+                <p className="t-caption">
+                  Pasien yang ingin melihat hasil di aplikasi butuh kode aktivasi dari petugas. Berikan kode secara
+                  langsung, bukan lewat pesan grup.
+                </p>
+                {codeError && <Banner tone="danger">{codeError}</Banner>}
+                {code ? (
+                  <p>
+                    Kode: <b className="mono" style={{ fontSize: 22, letterSpacing: 2 }}>{code.code}</b>{" "}
+                    <span className="t-caption">berlaku {code.expires_in_hours} jam, sekali pakai</span>
+                  </p>
+                ) : (
+                  <button className="btn btn--ghost" onClick={issueCode}>
+                    <Key size={18} />
+                    Buat kode aktivasi
+                  </button>
+                )}
+              </section>
+            )}
 
             {canDelete && (
               <button className="btn btn--danger btn--block" onClick={() => setConfirmDelete(true)}>

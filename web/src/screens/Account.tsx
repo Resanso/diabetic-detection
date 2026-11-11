@@ -1,12 +1,64 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { Cpu, Desktop, Flask, Moon, SignOut, Sun, Trash } from "@phosphor-icons/react";
-import { del, post } from "../lib/api";
+import { Cpu, Desktop, Flask, Moon, Receipt, SignOut, Sun, Trash } from "@phosphor-icons/react";
+import { del, get, post, type SatusehatStatus } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { ROLE_LABELS, initials } from "../lib/format";
-import { Banner, ConfirmDelete, Field, Segmented, TopBar, useToast } from "../components/ui";
+import { Banner, ConfirmDelete, Field, Segmented, TopBar, useAsync, useToast } from "../components/ui";
 import { getThemePref, setThemePref, type ThemePref } from "../lib/theme";
 import { PatientProfile } from "../components/PatientProfile";
+
+/** Admin: status sambungan SATUSEHAT. Kredensial diatur di server/.env, bukan dari layar ini. */
+function SatusehatSettings() {
+  const st = useAsync(() => get<SatusehatStatus>("/api/satusehat/status"), []);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function test() {
+    setBusy(true);
+    setResult(null);
+    try {
+      const r = await post<{ organization: string | null; org_id: string }>("/api/satusehat/test");
+      setResult({ ok: true, text: `Terhubung. Organisasi: ${r.organization ?? r.org_id}.` });
+    } catch (e) {
+      setResult({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const d = st.data;
+  return (
+    <section className="formgroup">
+      <h2 className="formgroup__title">SATUSEHAT</h2>
+      {st.error && <Banner tone="danger">{st.error}</Banner>}
+      {d && !d.configured && (
+        <p className="muted">
+          Belum diatur. Isi <span className="mono">SATUSEHAT_ORG_ID</span>, <span className="mono">SATUSEHAT_CLIENT_ID</span>, dan{" "}
+          <span className="mono">SATUSEHAT_CLIENT_SECRET</span> dari menu Kode Akses API di SATUSEHAT Platform ke berkas{" "}
+          <span className="mono">server/.env</span>, lalu jalankan ulang server.
+        </p>
+      )}
+      {d?.configured && (
+        <>
+          <dl className="kv">
+            <dt>Lingkungan</dt>
+            <dd>{d.env === "sandbox" ? "Sandbox (uji coba)" : "Production"}</dd>
+            <dt>Organization ID</dt>
+            <dd className="mono">{d.org_id}</dd>
+            <dt>Kirim otomatis</dt>
+            <dd>{d.auto ? "Ya, setelah dokter menyimpan bacaan" : "Tidak, dokter menekan tombol kirim"}</dd>
+          </dl>
+          <p className="muted">Pasien dicari dari NIK. Dokter pembaca perlu NIK di menu Pengguna.</p>
+          {result && <Banner tone={result.ok ? "ok" : "danger"}>{result.text}</Banner>}
+          <button className="btn btn--secondary btn--block" disabled={busy} onClick={test}>
+            {busy ? "Menghubungi SATUSEHAT..." : "Uji sambungan"}
+          </button>
+        </>
+      )}
+    </section>
+  );
+}
 
 export default function Account() {
   const { user, logout } = useAuth();
@@ -88,6 +140,19 @@ export default function Account() {
           </Link>
         )}
         {user.role === "admin" && (
+          <Link className="row card" to="/tarif" style={{ minHeight: 64 }}>
+            <Receipt size={22} />
+            <span className="row__body">
+              <span className="row__title" style={{ display: "block" }}>
+                Tarif layanan
+              </span>
+              <span className="row__meta" style={{ display: "block" }}>
+                Biaya skrining, gratis atau berbayar
+              </span>
+            </span>
+          </Link>
+        )}
+        {user.role === "admin" && (
           <a className="row card" href="/lab" style={{ minHeight: 64 }}>
             <Flask size={22} />
             <span className="row__body">
@@ -100,6 +165,8 @@ export default function Account() {
             </span>
           </a>
         )}
+
+        {user.role === "admin" && <SatusehatSettings />}
 
         <form className="formgroup" onSubmit={change} noValidate>
           <h2 className="formgroup__title">Ganti kata sandi</h2>

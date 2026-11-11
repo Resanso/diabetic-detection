@@ -8,6 +8,12 @@ DATA_DIR = os.getenv("DATA_DIR", os.path.join(BASE, "data"))
 IMG_DIR = os.path.join(DATA_DIR, "images")
 DB_PATH = os.path.join(DATA_DIR, "results.db")
 os.makedirs(IMG_DIR, exist_ok=True)
+# Data pasien hanya boleh dibaca akun yang menjalankan server
+for _d in (DATA_DIR, IMG_DIR):
+    try:
+        os.chmod(_d, 0o700)
+    except OSError:
+        pass
 
 
 @contextmanager
@@ -15,6 +21,7 @@ def db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA secure_delete = ON")   # baris yang dihapus ditimpa nol, tidak bisa dipulihkan dari berkas
     try:
         with conn:
             yield conn
@@ -41,6 +48,14 @@ CREATE TABLE IF NOT EXISTS users (
     last_login REAL,
     patient_id TEXT                        -- hanya untuk akun pasien
 );
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL, user_id INTEGER, role TEXT, ip TEXT,
+    action TEXT NOT NULL, target TEXT, status INTEGER, detail TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
+CREATE INDEX IF NOT EXISTS idx_audit_target ON audit_log(target);
 
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
@@ -140,6 +155,20 @@ CREATE TABLE IF NOT EXISTS appointments (
 );
 CREATE INDEX IF NOT EXISTS idx_appointments_session ON appointments(schedule_id, date, queue_no);
 CREATE INDEX IF NOT EXISTS idx_appointments_patient ON appointments(patient_id, date);
+
+-- Pengaturan kecil yang dibuat server sendiri, mis. ID Location SATUSEHAT
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+
+-- Tarif layanan skrining. price 0 = gratis (mis. program pemerintah atau penelitian).
+CREATE TABLE IF NOT EXISTS tariffs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    price INTEGER NOT NULL CHECK (price >= 0),   -- rupiah
+    description TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    is_default INTEGER NOT NULL DEFAULT 0,       -- dipakai bila pemeriksaan dibuat tanpa memilih tarif (mis. dari HP)
+    created_at REAL NOT NULL
+);
 """
 
 
@@ -181,22 +210,53 @@ def init_db():
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_patient ON users(patient_id) WHERE patient_id IS NOT NULL")
         pcols = {r["name"] for r in conn.execute("PRAGMA table_info(patients)")}
         for name, kind in [("payer", "TEXT"), ("bpjs_no", "TEXT"), ("bpjs_status", "TEXT"), ("bpjs_class", "TEXT"),
-                           ("bpjs_checked_at", "REAL"), ("insurer", "TEXT"), ("policy_no", "TEXT")]:
+                           ("bpjs_checked_at", "REAL"), ("insurer", "TEXT"), ("policy_no", "TEXT"),
+                           ("ihs_number", "TEXT"),   # nomor IHS SATUSEHAT, dicari dari NIK
+                           # Hasil cek kepesertaan (Coverage) di SATUSEHAT: aktif | tidak_ditemukan
+                           ("ss_cov_status", "TEXT"), ("ss_cov_id", "TEXT"), ("ss_cov_payor", "TEXT"),
+                           ("ss_cov_checked_at", "REAL"),
+                           # Kode aktivasi akun pasien (hash) untuk data yang sudah dibuat petugas
+                           ("activation_hash", "TEXT"), ("activation_expires", "REAL"),
+                           # Persetujuan pasien atas pemrosesan data kesehatan (UU PDP Pasal 20 dan 22)
+                           ("consent_at", "REAL"), ("consent_by", "INTEGER"), ("consent_version", "TEXT")]:
             if name not in pcols:
                 conn.execute(f"ALTER TABLE patients ADD COLUMN {name} {kind}")
+        if "last_seen" not in {r["name"] for r in conn.execute("PRAGMA table_info(sessions)")}:
+            conn.execute("ALTER TABLE sessions ADD COLUMN last_seen REAL")
+        ucols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+        for name in ("nik", "ihs_number"):              # NIK nakes untuk mencari Practitioner SATUSEHAT
+            if name not in ucols:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {name} TEXT")
+        scols = {r["name"] for r in conn.execute("PRAGMA table_info(screenings)")}
+        # Status kirim SATUSEHAT: ss_status mengirim|terkirim|gagal, ss_refs = ID resource FHIR (JSON)
+        # Tarif disalin ke pemeriksaan saat dipilih, supaya perubahan tarif tidak mengubah tagihan lama
+        for name, kind in [("ss_status", "TEXT"), ("ss_error", "TEXT"), ("ss_sent_at", "REAL"), ("ss_refs", "TEXT"),
+                           ("tariff_id", "TEXT"), ("tariff_name", "TEXT"), ("tariff_price", "INTEGER"),
+                           ("paid_at", "REAL"), ("paid_by", "INTEGER"),
+                           # Deskripsi model bahasa lokal (llm.py): llm_status membuat|selesai|gagal, llm_result JSON
+                           ("llm_status", "TEXT"), ("llm_result", "TEXT"), ("llm_error", "TEXT"), ("llm_at", "REAL")]:
+            if name not in scols:
+                conn.execute(f"ALTER TABLE screenings ADD COLUMN {name} {kind}")
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(results)")}
         for name, kind in [("p_referable", "REAL"), ("true_grade", "INTEGER"), ("is_correct", "INTEGER"),
                            ("screening_id", "TEXT"), ("eye", "TEXT"), ("user_id", "INTEGER")]:
             if name not in cols:
                 conn.execute(f"ALTER TABLE results ADD COLUMN {name} {kind}")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_results_screening ON results(screening_id)")
+        if conn.execute("SELECT COUNT(*) FROM tariffs").fetchone()[0] == 0:
+            import time, uuid
+            now = time.time()
+            conn.executemany(
+                "INSERT INTO tariffs (id, name, price, description, is_default, created_at) VALUES (?,?,?,?,?,?)",
+                [(uuid.uuid4().hex[:12], "Skrining retina gratis", 0, "Program skrining tanpa biaya", 1, now),
+                 (uuid.uuid4().hex[:12], "Skrining retina", 50000, "Contoh tarif, ubah sesuai klinik", 0, now)])
 
 
 def purge_results(conn, where: str, args: tuple = ()) -> int:
     """Hapus baris foto beserta berkasnya (asli, kontras, peta lesi) dari disk. Mengembalikan jumlah foto."""
     rows = conn.execute(f"SELECT id, filename FROM results WHERE {where}", args).fetchall()
     for r in rows:
-        for name in (r["filename"], f"{r['id']}_prep.jpg", f"{r['id']}_heat.jpg"):
+        for name in (r["filename"], f"{r['id']}_prep.jpg", f"{r['id']}_heat.jpg", f"{r['id']}_cam.jpg"):
             if name:
                 try:
                     os.remove(os.path.join(IMG_DIR, os.path.basename(name)))

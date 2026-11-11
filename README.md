@@ -27,7 +27,7 @@ Desain dan bahasa mengikuti `docs/BRAND.md`. Kode di `web/` (React + Vite), hasi
 | Peran | Pekerjaan |
 |---|---|
 | Perawat | daftar/cari pasien, isi data klinis (gula darah, tekanan darah, visus, keluhan), foto retina mata kanan & kiri lewat **kamera HP + lensa fundus** atau **ESP32-CAM**, kirim ke dokter, lihat hasil bacaan, bantu antrean (tandai hadir, pasien datang langsung) |
-| Dokter | layar antrean pasien (panggil berikutnya, selesai, tidak hadir), jadwal praktik dan pratinjau mingguan, bacaan foto yang diurutkan risiko AI, penampil foto (zoom, kontras, peta lesi), keputusan rujukan; bisa juga memotret sendiri |
+| Dokter | layar antrean pasien (panggil berikutnya, selesai, tidak hadir), jadwal praktik dan pratinjau mingguan, bacaan foto yang diurutkan risiko AI, penampil foto (zoom, kontras, peta kontras, Fokus AI), keputusan rujukan; bisa juga memotret sendiri |
 | Admin | kelola akun (termasuk akun pasien), jadwal semua dokter, perangkat ESP32, bersihkan data uji, lab model di `/lab` |
 | Pasien | daftar sendiri dengan NIK, pilih cara bayar (BPJS, asuransi, umum), booking sesi dokter dan langsung dapat nomor antrean, ambil antrean di klinik, tandai hadir, pantau nomor yang sedang dilayani |
 
@@ -53,6 +53,29 @@ Variabel lingkungan server: `DEVICE_KEY` (kunci ESP32, header `X-API-Key`), `COO
 **BPJS (VClaim).** Isi `BPJS_CONS_ID`, `BPJS_SECRET`, `BPJS_USER_KEY` dari BPJS Kesehatan (didapat faskes setelah
 kerja sama), dan `BPJS_BASE_URL` (bawaan server pengembangan `https://apijkn-dev.bpjs-kesehatan.go.id/vclaim-rest-dev`).
 Tanpa kredensial, nomor kartu tetap disimpan dan tombol cek status disembunyikan. Klien ada di `server/bpjs.py`.
+**SATUSEHAT (Kemenkes).** Salin `server/.env.example` menjadi `server/.env`, isi `SATUSEHAT_ORG_ID`,
+`SATUSEHAT_CLIENT_ID`, `SATUSEHAT_CLIENT_SECRET` dari SATUSEHAT Platform (menu Kode Akses API), dan
+`SATUSEHAT_ENV=sandbox` atau `production`. Setelah dokter menyimpan bacaan, server mengirim satu kunjungan rawat jalan
+(FHIR R4): Encounter, Observation (tekanan darah, gula darah, HbA1c, hasil pemeriksaan mata per mata), dan Condition
+(ICD-10 E10.3/E11.3/E14.3 bila ada retinopati, Z13.5 bila tidak). Pasien dicari dari NIK; dokter pembaca perlu NIK
+di menu Pengguna. Status kirim dan tombol kirim ulang ada di halaman pemeriksaan (dokter/admin), uji sambungan di
+menu Akun (admin). Kirim ulang memperbarui resource yang sama. Klien ada di `server/satusehat.py`.
+Tarif layanan diatur admin di menu Akun, Tarif layanan (Rp0 = gratis; satu tarif bawaan dipakai bila tidak dipilih,
+termasuk pemeriksaan dari aplikasi HP). Perawat memilih tarif di langkah data klinis dan menandai lunas di halaman
+pemeriksaan. Tagihan dikirim sebagai Account, ChargeItem, Invoice, dan bila lunas PaymentReconciliation +
+PaymentNotice (modul Pembiayaan SATUSEHAT, masih sandbox). Account ditautkan ke Coverage BPJS/asuransi di SATUSEHAT
+hanya bila nomor kartu/polis pasien sama. Kode ada di `server/billing.py`.
+Di sandbox hanya NIK uji coba yang dikenal, mis. pasien `9271060312000001` dan dokter `6408130207800005`
+(daftar lengkap di dokumentasi SATUSEHAT, halaman Patient dan Practitioner).
+
+**Deskripsi model bahasa (llama.cpp, opsional).** Bila `llama-server` berjalan di `LLM_URL` (bawaan
+`http://127.0.0.1:8081`), server menulis deskripsi tiap pemeriksaan: temuan visual per mata dan ringkasan untuk dokter
+(saat dikirim ke dokter), lalu penjelasan bahasa awam untuk pasien (setelah dokter membaca). Untuk membaca foto, jalankan
+model multimodal dengan proyektornya, mis.
+`llama-server -m Qwen...gguf --mmproj mmproj-Qwen...gguf --jinja -c 16384 --port 8081 -ngl 99`. Tanpa `--mmproj`
+deskripsi dibuat dari data saja. `LLM_AUTO=0` mematikan pembuatan otomatis (tombol Buat deskripsi tetap ada).
+Model klasifikasi tetap penentu perkiraan derajat; model bahasa tidak mengubahnya. Kode di `server/llm.py`.
+
 Di ESP32, isi `SECRET_API_KEY` dengan nilai `DEVICE_KEY` dan `SECRET_SERVER_URL` dengan `http://<server>:8000/api/predict`.
 
 ---
@@ -213,3 +236,22 @@ perangkat Anda sendiri, minta dokter mata memberi label, lalu fine-tune ulang.
 - Tambah model penilai kualitas gambar sebelum model DR.
 - Grad-CAM untuk menampilkan area retina yang memengaruhi keputusan model.
 - Versi *on-device* di ESP32-S3: latih MobileNetV3-small 224px, kuantisasi int8 ke TFLite, jalankan dengan TFLite Micro atau ESP-DL, lalu bandingkan akurasinya dengan versi server.
+
+## Fokus AI (explainable AI)
+
+Tampilan "Fokus AI" di penampil foto menunjukkan bagian foto yang paling mendorong model ke derajat perkiraannya.
+Metodenya Class Activation Map (CAM, Zhou dkk. 2016): fitur konvolusi terakhir EfficientNet-B0 (1280 × 10 × 10)
+dikalikan bobot lapisan klasifikasi. Karena kepala model hanya GlobalAveragePool lalu satu lapisan linear, hasilnya
+sama dengan Grad-CAM pada lapisan itu, tanpa perlu gradien atau checkpoint PyTorch.
+
+- `server/inference.py` menambahkan keluaran fitur ke `dr_model.onnx` saat dimuat (perlu paket `onnx`; tanpanya
+  server tetap jalan tanpa Fokus AI). Prediksi tidak berubah dan tidak ada inferensi kedua.
+- Bobot dibuat kontrastif (derajat itu dikurangi rata-rata semua derajat), dibatasi ke lingkaran retina, dan
+  dinormalkan per foto. Bila AI memperkirakan derajat 0, peta menjelaskan derajat RD yang paling mungkin.
+- Peta disimpan sebagai `data/images/<id>_cam.jpg`; foto lama dibuatkan saat pertama dibuka.
+- Hanya dokter dan admin (atau perawat bila `SHOW_AI_TO_NURSE=1`) yang bisa melihatnya, karena peta membuka
+  perkiraan AI sebelum dokter membaca.
+- Resolusinya kasar (10 × 10 sel), jadi menunjukkan wilayah, bukan lesi tunggal.
+
+"Peta kontras" (dulu "Peta lesi") adalah pengolahan gambar biasa (CLAHE kanal hijau), bukan hasil model.
+

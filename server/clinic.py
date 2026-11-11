@@ -5,7 +5,11 @@ import os
 import time
 import uuid
 
-from fastapi import APIRouter, Cookie, Depends, File, Form, HTTPException, Query, Response, UploadFile
+import hashlib
+import ipaddress
+import secrets
+
+from fastapi import APIRouter, Cookie, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 
@@ -18,22 +22,30 @@ from auth import (
     clear_login_failures,
     create_session,
     current_user,
+    delete_other_sessions,
     delete_session,
     hash_password,
     public_user,
     record_login_failure,
     require_role,
+    verify_or_dummy,
     verify_password,
 )
 from database import db, purge_results
+from security import audit, client_ip
 from devices import MAX_BYTES, request_capture
 from inference import LABELS, REF_PROB, row_to_dict, run_inference
+import billing
+import llm
+import satusehat
 
 router = APIRouter()
 
 # Perawat melihat kualitas foto dan keputusan dokter. Perkiraan AI hanya untuk dokter, kecuali diaktifkan.
 SHOW_AI_TO_NURSE = os.getenv("SHOW_AI_TO_NURSE", "0") == "1"
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"
+SETUP_TOKEN = os.getenv("SETUP_TOKEN", "")      # wajib untuk membuat admin pertama dari luar jaringan lokal
+CONSENT_VERSION = "2026-11"                     # versi naskah persetujuan yang dibacakan ke pasien
 EYES = ("kanan", "kiri")
 DECISIONS = ("rujuk_segera", "rujuk", "rujuk_lain", "ulang_6", "ulang_12", "normal", "foto_ulang")
 
@@ -57,7 +69,8 @@ class LoginBody(BaseModel):
 class SetupBody(BaseModel):
     username: str = Field(min_length=3, max_length=40)
     full_name: str = Field(min_length=2, max_length=80)
-    password: str = Field(min_length=8, max_length=200)
+    password: str = Field(min_length=10, max_length=200)
+    setup_token: str | None = None
 
 
 def set_session_cookie(response: Response, token: str):
@@ -73,9 +86,21 @@ def auth_status():
 
 
 @router.post("/api/auth/setup")
-def setup_first_admin(body: SetupBody, response: Response):
-    """Membuat akun admin pertama. Hanya bisa dipakai saat belum ada akun sama sekali."""
+def setup_first_admin(body: SetupBody, request: Request, response: Response):
+    """Membuat akun admin pertama. Hanya bisa dipakai saat belum ada akun sama sekali, dari jaringan lokal
+    atau dengan SETUP_TOKEN, supaya orang lain tidak bisa mengambil alih server baru yang terbuka di internet."""
+    ip = client_ip(request)
+    try:
+        local = ipaddress.ip_address(ip).is_loopback or ipaddress.ip_address(ip).is_private
+    except ValueError:
+        local = False
+    if SETUP_TOKEN:
+        if not (body.setup_token and secrets.compare_digest(body.setup_token, SETUP_TOKEN)):
+            raise HTTPException(403, "Kode penyiapan salah. Lihat variabel SETUP_TOKEN di server.")
+    elif not local:
+        raise HTTPException(403, "Admin pertama hanya bisa dibuat dari jaringan lokal server, atau setel SETUP_TOKEN.")
     with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")   # dua permintaan bersamaan tidak boleh sama-sama membuat admin
         if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] > 0:
             raise HTTPException(409, "Akun admin sudah dibuat. Silakan masuk.")
         cur = conn.execute(
@@ -87,17 +112,19 @@ def setup_first_admin(body: SetupBody, response: Response):
 
 
 @router.post("/api/auth/login")
-def login(body: LoginBody, response: Response):
+def login(body: LoginBody, request: Request, response: Response):
     username = body.username.strip()
-    check_login_allowed(username)
+    ip = client_ip(request)
+    check_login_allowed(username, ip)
     with db() as conn:
         row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
-    if row is None or not verify_password(body.password, row["password_hash"]):
-        record_login_failure(username)
+    if not verify_or_dummy(body.password, row["password_hash"] if row else None):
+        record_login_failure(username, ip)
+        audit("login_gagal", row["id"] if row else None, detail={"akun_ada": row is not None}, status=401)
         raise HTTPException(401, "Nama pengguna atau kata sandi salah.")
     if not row["active"]:
         raise HTTPException(403, "Akun ini dinonaktifkan. Hubungi admin.")
-    clear_login_failures(username)
+    clear_login_failures(username, ip)
     set_session_cookie(response, create_session(row["id"]))
     return public_user(row)
 
@@ -116,26 +143,44 @@ def me(user: dict = Depends(any_user)):
 
 class PasswordBody(BaseModel):
     current: str
-    new: str = Field(min_length=8, max_length=200)
+    new: str = Field(min_length=10, max_length=200)
 
 
 @router.post("/api/auth/password")
-def change_password(body: PasswordBody, user: dict = Depends(any_user)):
+def change_password(body: PasswordBody, user: dict = Depends(any_user),
+                    retinova_session: str | None = Cookie(None)):
     with db() as conn:
         row = conn.execute("SELECT password_hash FROM users WHERE id=?", (user["id"],)).fetchone()
         if not verify_password(body.current, row["password_hash"]):
             raise HTTPException(400, "Kata sandi saat ini salah.")
         conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(body.new), user["id"]))
+    delete_other_sessions(user["id"], retinova_session)   # perangkat lain harus masuk ulang
     return {"ok": True}
 
 
 # --- Pengguna (admin) ---
+
+def staff_nik(v: str | None) -> str | None:
+    """NIK tenaga kesehatan, dipakai mencari nomor IHS Practitioner di SATUSEHAT."""
+    v = (v or "").strip()
+    if not v:
+        return None
+    if not (len(v) == 16 and v.isdigit()):
+        raise ValueError("NIK harus 16 digit angka")
+    return v
+
 
 class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=40, pattern=r"^[A-Za-z0-9._-]+$")
     full_name: str = Field(min_length=2, max_length=80)
     role: str
     password: str = Field(min_length=8, max_length=200)
+    nik: str | None = None
+
+    @field_validator("nik")
+    @classmethod
+    def _nik(cls, v):
+        return staff_nik(v)
 
     @field_validator("role")
     @classmethod
@@ -150,6 +195,12 @@ class UserUpdate(BaseModel):
     role: str | None = None
     active: bool | None = None
     password: str | None = Field(None, min_length=8, max_length=200)
+    nik: str | None = None   # "" = hapus NIK
+
+    @field_validator("nik")
+    @classmethod
+    def _nik(cls, v):
+        return v if v == "" else staff_nik(v)
 
     @field_validator("role")
     @classmethod
@@ -172,8 +223,8 @@ def create_user(body: UserCreate):
         if conn.execute("SELECT 1 FROM users WHERE username=?", (body.username,)).fetchone():
             raise HTTPException(409, "Nama pengguna sudah dipakai.")
         cur = conn.execute(
-            "INSERT INTO users (username, full_name, role, password_hash, created_at) VALUES (?,?,?,?,?)",
-            (body.username, body.full_name.strip(), body.role, hash_password(body.password), time.time()))
+            "INSERT INTO users (username, full_name, role, password_hash, created_at, nik) VALUES (?,?,?,?,?,?)",
+            (body.username, body.full_name.strip(), body.role, hash_password(body.password), time.time(), body.nik))
         row = conn.execute("SELECT * FROM users WHERE id=?", (cur.lastrowid,)).fetchone()
     return public_user(row)
 
@@ -216,6 +267,8 @@ def update_user(user_id: int, body: UserUpdate, admin: dict = Depends(require_ro
             conn.execute("UPDATE users SET active=? WHERE id=?", (int(body.active), user_id))
             if not body.active:
                 conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        if body.nik is not None and (body.nik or None) != row["nik"]:
+            conn.execute("UPDATE users SET nik=?, ihs_number=NULL WHERE id=?", (body.nik or None, user_id))
         if body.password:
             conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(body.password), user_id))
             conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
@@ -269,6 +322,8 @@ class PatientBody(PayerFields):
     on_insulin: bool | None = None
     hypertension: bool | None = None
     notes: str | None = Field(None, max_length=1000)
+    # Persetujuan pasien atas pemrosesan data kesehatannya. None = klien lama yang belum mengirim (dicatat kosong).
+    consent: bool | None = None
 
     @field_validator("nik")
     @classmethod
@@ -305,6 +360,8 @@ class PatientBody(PayerFields):
 
 def patient_dict(r) -> dict:
     d = dict(r)
+    for k in ("activation_hash", "activation_expires"):
+        d.pop(k, None)
     d["on_insulin"] = None if r["on_insulin"] is None else bool(r["on_insulin"])
     d["hypertension"] = None if r["hypertension"] is None else bool(r["hypertension"])
     return d
@@ -376,6 +433,8 @@ def latest_photo_screening(conn, patient_id: str, user: dict) -> dict | None:
 @router.post("/api/patients")
 def create_patient(body: PatientBody, user: dict = Depends(require_role("perawat", "dokter", "admin"))):
     body.check_complete()
+    if body.consent is False:
+        raise HTTPException(422, "Data pasien hanya boleh disimpan setelah pasien menyetujui pemrosesan datanya.")
     now = time.time()
     pid = new_id()
     with db() as conn:
@@ -385,6 +444,9 @@ def create_patient(body: PatientBody, user: dict = Depends(require_role("perawat
             f"INSERT INTO patients (id, mrn, {', '.join(PATIENT_FIELDS)}, created_by, created_at, updated_at)"
             f" VALUES (?, ?, {', '.join('?' * len(PATIENT_FIELDS))}, ?, ?, ?)",
             [pid, next_mrn(conn), *patient_values(body), user["id"], now, now])
+        if body.consent:
+            conn.execute("UPDATE patients SET consent_at=?, consent_by=?, consent_version=? WHERE id=?",
+                         (now, user["id"], CONSENT_VERSION, pid))
         row = conn.execute("SELECT * FROM patients WHERE id=?", (pid,)).fetchone()
     return patient_dict(row)
 
@@ -440,11 +502,11 @@ def wipe_data(confirm: str = Query(...)):
     return {"ok": True, **counts}
 
 
-@router.put("/api/patients/{patient_id}", dependencies=[Depends(current_user)])
-def update_patient(patient_id: str, body: PatientBody):
+@router.put("/api/patients/{patient_id}")
+def update_patient(patient_id: str, body: PatientBody, user: dict = Depends(current_user)):
     body.check_complete()
     with db() as conn:
-        old = conn.execute("SELECT bpjs_no FROM patients WHERE id=?", (patient_id,)).fetchone()
+        old = conn.execute("SELECT bpjs_no, nik, payer, policy_no FROM patients WHERE id=?", (patient_id,)).fetchone()
         if old is None:
             raise HTTPException(404, "Pasien tidak ditemukan.")
         if body.nik and conn.execute("SELECT 1 FROM patients WHERE nik=? AND id<>?",
@@ -454,8 +516,32 @@ def update_patient(patient_id: str, body: PatientBody):
             f"UPDATE patients SET {', '.join(f'{k}=?' for k in PATIENT_FIELDS)}, updated_at=? WHERE id=?",
             [*patient_values(body), time.time(), patient_id])
         reset_bpjs_if_changed(conn, patient_id, old["bpjs_no"], body.bpjs_no)
+        if body.consent:
+            conn.execute("UPDATE patients SET consent_at=?, consent_by=?, consent_version=? WHERE id=? AND consent_at IS NULL",
+                         (time.time(), user["id"], CONSENT_VERSION, patient_id))
+        if old["nik"] != body.nik:   # nomor IHS SATUSEHAT dicari ulang dari NIK baru
+            conn.execute("UPDATE patients SET ihs_number=NULL WHERE id=?", (patient_id,))
+        # cara bayar atau nomor kartu berubah: hasil cek kepesertaan SATUSEHAT lama tidak berlaku
+        conn.execute("UPDATE patients SET ss_cov_status=NULL, ss_cov_id=NULL, ss_cov_payor=NULL, ss_cov_checked_at=NULL"
+                     " WHERE id=? AND NOT (payer IS ? AND bpjs_no IS ? AND policy_no IS ?)",
+                     (patient_id, old["payer"], old["bpjs_no"], old["policy_no"]))
         row = conn.execute("SELECT * FROM patients WHERE id=?", (patient_id,)).fetchone()
     return patient_dict(row)
+
+
+@router.post("/api/patients/{patient_id}/activation-code")
+def activation_code(patient_id: str, user: dict = Depends(require_role("perawat", "admin"))):
+    """Kode sekali pakai (berlaku 72 jam) yang diberikan petugas kepada pasien, supaya pasien bisa membuat akun
+    untuk data yang sudah dicatat klinik. Tanpa kode ini, orang yang hanya tahu NIK tidak bisa mengambil alih data."""
+    code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(8))
+    with db() as conn:
+        if not conn.execute("SELECT 1 FROM patients WHERE id=?", (patient_id,)).fetchone():
+            raise HTTPException(404, "Pasien tidak ditemukan.")
+        if conn.execute("SELECT 1 FROM users WHERE patient_id=?", (patient_id,)).fetchone():
+            raise HTTPException(409, "Pasien ini sudah punya akun.")
+        conn.execute("UPDATE patients SET activation_hash=?, activation_expires=? WHERE id=?",
+                     (hashlib.sha256(code.encode()).hexdigest(), time.time() + 72 * 3600, patient_id))
+    return {"code": code, "expires_in_hours": 72}
 
 
 # --- Pemeriksaan ---
@@ -482,6 +568,7 @@ class ScreeningBody(BaseModel):
 
 class ScreeningCreate(ScreeningBody):
     patient_id: str
+    tariff_id: str | None = None   # kosong = tarif bawaan
 
 
 SCREENING_FIELDS = tuple(ScreeningBody.model_fields)
@@ -511,7 +598,8 @@ def image_for(user: dict, r) -> dict:
     out = {k: d[k] for k in ("id", "ts", "device", "source", "image_url", "preprocessed_url",
                              "heatmap_url", "quality", "eye")}
     if can_see_ai(user) and d["quality"].get("is_fundus", True) is not False:
-        out.update({k: d[k] for k in ("grade", "label", "confidence", "referable", "p_referable", "probs")})
+        out.update({k: d[k] for k in ("grade", "label", "confidence", "referable", "p_referable", "probs",
+                                      "cam_url", "cam_grade")})
     return out
 
 
@@ -523,7 +611,7 @@ def user_name(conn, user_id) -> str | None:
 
 
 def screening_summary(conn, s, user: dict) -> dict:
-    d = dict(s)
+    d = {k: v for k, v in dict(s).items() if not k.startswith(("ss_", "llm_"))}
     d["dr_dme"] = None if s["dr_dme"] is None else bool(s["dr_dme"])
     d["ai_referable"] = None if s["ai_referable"] is None else bool(s["ai_referable"])
     if not can_see_ai(user):
@@ -535,6 +623,9 @@ def screening_summary(conn, s, user: dict) -> dict:
                           (s["id"],)).fetchall()
     d["image_count"] = len(thumbs)
     d["thumbnail_url"] = f"/images/{thumbs[-1]['filename']}" if thumbs else None
+    for k in ("tariff_id", "tariff_name", "tariff_price", "paid_at", "paid_by"):
+        d.pop(k, None)
+    d["billing"] = billing.billing_for(conn, s)
     return d
 
 
@@ -555,6 +646,8 @@ def screening_detail(conn, s, user: dict) -> dict:
         "SELECT * FROM screenings WHERE patient_id=? AND id<>? AND status='dibaca'"
         " ORDER BY reviewed_at DESC LIMIT 5", (s["patient_id"], s["id"])).fetchall()]
     d["ref_threshold"] = REF_PROB if can_see_ai(user) else None
+    d["satusehat"] = satusehat.state_of(s)   # semua peran melihat status; hanya dokter/admin yang bisa mengirim
+    d["llm"] = llm.state_for(s, user, can_see_ai(user))
     d["labels"] = LABELS
     return d
 
@@ -632,6 +725,7 @@ def create_screening(body: ScreeningCreate, user: dict = Depends(require_role("p
             f" VALUES (?, ?, ?, 'draf', ?, {', '.join('?' * len(SCREENING_FIELDS))})",
             [sid, body.patient_id, user["id"], time.time(),
              *[clean(v) if isinstance(v, str) else v for v in (getattr(body, k) for k in SCREENING_FIELDS)]])
+        billing.apply_tariff(conn, sid, body.tariff_id)
         return screening_detail(conn, load_screening(conn, sid), user)
 
 
@@ -725,7 +819,11 @@ def submit_screening(screening_id: str, user: dict = Depends(current_user)):
         refresh_ai_summary(conn, screening_id)
         conn.execute("UPDATE screenings SET status='menunggu', submitted_at=? WHERE id=?",
                      (time.time(), screening_id))
-        return screening_detail(conn, load_screening(conn, screening_id), user)
+        describe = llm.queue(conn, screening_id)
+        detail = screening_detail(conn, load_screening(conn, screening_id), user)
+    if describe:
+        llm.start(screening_id)   # deskripsi untuk dokter dibuat sambil menunggu dibaca
+    return detail
 
 
 @router.post("/api/screenings/{screening_id}/review")
@@ -734,12 +832,23 @@ def review_screening(screening_id: str, body: ReviewBody, user: dict = Depends(r
         s = load_screening(conn, screening_id)
         if s["status"] == "draf":
             raise HTTPException(409, "Pemeriksaan ini belum dikirim untuk dibaca.")
+        if s["status"] == "dibaca":
+            # Bacaan lama tidak hilang: disimpan di jejak audit sebelum diganti (riwayat versi rekam medis)
+            audit("bacaan_diganti", user["id"], user["role"], target=f"screening:{screening_id}",
+                  detail={k: s[k] for k in ("doctor_id", "reviewed_at", "dr_grade_right", "dr_grade_left", "dr_dme",
+                                            "decision", "doctor_notes")})
         conn.execute(
             "UPDATE screenings SET status='dibaca', doctor_id=?, reviewed_at=?, dr_grade_right=?, dr_grade_left=?,"
             " dr_dme=?, decision=?, doctor_notes=? WHERE id=?",
             (user["id"], time.time(), body.grade_right, body.grade_left,
              None if body.dme is None else int(body.dme), body.decision, clean(body.notes), screening_id))
-        return screening_detail(conn, load_screening(conn, screening_id), user)
+        satusehat.mark_queued(conn, screening_id)
+        describe = llm.queue(conn, screening_id)   # perbarui dengan penjelasan untuk pasien
+        detail = screening_detail(conn, load_screening(conn, screening_id), user)
+    if describe:
+        llm.start(screening_id)
+    satusehat.send_in_background(screening_id)   # setelah commit, supaya pengirim membaca bacaan terbaru
+    return detail
 
 
 @router.get("/api/summary")

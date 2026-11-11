@@ -149,9 +149,13 @@ async def device_frame(request: Request, x_device_id: str = Header("unknown"),
     return device_reply(dev, x_device_id, x_settings_version)
 
 
-@router.post("/api/predict", dependencies=[Depends(device_or_staff)])
-async def predict_raw(request: Request, x_device_id: str = Header("unknown")):
-    """Untuk ESP32: body = bytes JPEG mentah."""
+@router.post("/api/predict")
+async def predict_raw(request: Request, x_device_id: str = Header("unknown"),
+                      caller: dict | None = Depends(device_or_staff)):
+    """Untuk ESP32: body = bytes JPEG mentah. Perawat tidak boleh memakai jalur ini untuk melihat hasil AI
+    yang disembunyikan dari perannya di aplikasi (kecuali SHOW_AI_TO_NURSE=1)."""
+    if caller is not None and caller["role"] == "perawat" and os.getenv("SHOW_AI_TO_NURSE", "0") != "1":
+        raise HTTPException(403, "Hasil AI hanya untuk dokter atau admin.")
     data = await read_limited(request)
     dev = touch_device(x_device_id, request.client.host if request.client else None)
 

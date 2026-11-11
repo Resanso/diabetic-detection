@@ -28,3 +28,8 @@ esp32/**/build/
 web/node_modules/
 server/static/app/
 web/tsconfig.tsbuildinfo
+
+# Kredensial server (SATUSEHAT, BPJS)
+server/.env
+server/model/*.npy
+server/model/b0_backup/

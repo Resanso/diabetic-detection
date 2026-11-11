@@ -34,6 +34,8 @@ const timeFmt = new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-d
 const numFmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 1 });
 
 export const fmtNum = (n: number | null | undefined) => (n == null ? "-" : numFmt.format(n));
+const rpFmt = new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
+export const fmtRp = (n: number) => (n === 0 ? "Gratis" : rpFmt.format(n));
 export const fmtPct = (p: number | null | undefined) => (p == null ? "-" : `${Math.round(p * 100)}%`);
 
 export function fmtDate(ts: number | null | undefined) {

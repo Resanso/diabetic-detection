@@ -441,6 +441,7 @@ textarea.input { min-height: 96px; resize: vertical; }
 .viewer .seg__opt[aria-pressed="true"] { background: #323438; color: #fff; box-shadow: none; }
 .viewer__missing { color: #9c9ea3; font-size: 14px; padding: var(--s6); text-align: center; }
 .viewer__label { position: absolute; left: var(--s3); top: var(--s3); font-size: 13px; color: #c5c7cb; pointer-events: none; }
+.viewer__note { margin: 0; padding: 0 var(--s3) var(--s3); font-size: 13px; line-height: 1.45; color: #c5c7cb; }
 
 /* ---------- Panel AI ---------- */
 .ai { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); padding: var(--s4); }
@@ -662,3 +663,6 @@ textarea.input { min-height: 96px; resize: vertical; }
 .week__meter span { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
 .week__meter span[data-full] { background: var(--g2); }
 .week__empty { color: var(--ink-3); }
+
+.consent { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.45; color: var(--text-2, inherit); }
+.consent input { width: 18px; height: 18px; margin-top: 2px; flex: none; accent-color: var(--accent); }

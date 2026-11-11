@@ -25,6 +25,7 @@ import DoctorQueue from "./screens/DoctorQueue";
 import ReadHistory from "./screens/ReadHistory";
 import Users from "./screens/Users";
 import Devices from "./screens/Devices";
+import Tariffs from "./screens/Tariffs";
 import Account from "./screens/Account";
 import Register from "./screens/Register";
 import PatientHome from "./screens/PatientHome";
@@ -135,6 +136,7 @@ export default function App() {
         <Route element={<Only roles={["admin"]} />}>
           <Route path="/pengguna" element={<Users />} />
           <Route path="/perangkat" element={<Devices />} />
+          <Route path="/tarif" element={<Tariffs />} />
         </Route>
         <Route path="/antrean" element={<QueueBoard />} />
         <Route path="/jadwal" element={<Schedule />} />

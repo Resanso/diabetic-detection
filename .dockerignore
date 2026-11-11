@@ -16,3 +16,7 @@ web/node_modules
 server/static/app
 server/data
 server/model
+server/.env
+**/.env
+*.env
+server/venv

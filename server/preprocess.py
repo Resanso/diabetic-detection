@@ -5,6 +5,10 @@ PENTING: file ini dipakai SAMA PERSIS saat training dan saat inferensi di server
 Kalau preprocessing berbeda antara training dan deploy, akurasi model akan turun drastis.
 Salin file ini ke folder server/ setiap kali Anda mengubahnya.
 """
+import os
+
+# Batas piksel dibaca OpenCV dari header sebelum memori dialokasikan (pertahanan "bom gambar").
+os.environ.setdefault("OPENCV_IO_MAX_IMAGE_PIXELS", str(40_000_000))
 import cv2
 import numpy as np
 
@@ -90,10 +94,15 @@ def to_model_input(img: np.ndarray) -> np.ndarray:
     return x.transpose(2, 0, 1)[None].astype(np.float32)
 
 
+MAX_PIXELS = 40_000_000  # 40 MP, di atas kamera HP mana pun untuk foto fundus
+
+
 def decode_image(data: bytes) -> np.ndarray | None:
     """Bytes JPEG/PNG -> RGB uint8, atau None jika gagal."""
     arr = np.frombuffer(data, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is not None and img.shape[0] * img.shape[1] > MAX_PIXELS:
+        return None
     if img is None:
         return None
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)

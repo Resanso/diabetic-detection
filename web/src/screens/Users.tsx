@@ -15,11 +15,13 @@ function UserSheet({ user, onClose, onSaved }: { user: User | null; onClose: () 
   const isPatient = user?.role === "pasien";
   const [role, setRole] = useState<Role>(user?.role ?? "perawat");
   const [password, setPassword] = useState("");
+  const [nik, setNik] = useState(user?.nik ?? "");
   const [active, setActive] = useState(user?.active ?? true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const self = user?.id === me?.id;
+  const nikOk = nik === "" || /^\d{16}$/.test(nik);
 
   if (confirmDelete && user)
     return (
@@ -45,10 +47,10 @@ function UserSheet({ user, onClose, onSaved }: { user: User | null; onClose: () 
     setError(null);
     try {
       if (user) {
-        await patch(`/api/users/${user.id}`, { full_name: fullName, ...(isPatient ? {} : { role }), active, ...(password ? { password } : {}) });
+        await patch(`/api/users/${user.id}`, { full_name: fullName, ...(isPatient ? {} : { role, nik }), active, ...(password ? { password } : {}) });
         toast(password ? "Akun disimpan, kata sandi diatur ulang" : "Akun disimpan");
       } else {
-        await post("/api/users", { username, full_name: fullName, role, password });
+        await post("/api/users", { username, full_name: fullName, role, password, nik });
         toast(`Akun ${username} dibuat`);
       }
       onSaved();
@@ -76,6 +78,20 @@ function UserSheet({ user, onClose, onSaved }: { user: User | null; onClose: () 
         ) : (
           <Field label="Peran">{() => <Segmented label="Peran" value={role} onChange={(v) => !self && setRole(v)} options={ROLE_OPTIONS} />}</Field>
         )}
+        {!isPatient && role !== "admin" && (
+          <Field
+            label="NIK"
+            optional
+            error={nik && !nikOk ? "NIK 16 digit angka." : undefined}
+            hint={
+              user?.satusehat_linked && nik === user.nik
+                ? "Terhubung ke SATUSEHAT sebagai tenaga kesehatan."
+                : "Untuk mengirim bacaan dokter ke SATUSEHAT. Nomor IHS dicari otomatis dari NIK."
+            }
+          >
+            {(p) => <input {...p} className="input mono" inputMode="numeric" maxLength={16} value={nik} onChange={(e) => setNik(e.target.value.replace(/\D/g, ""))} />}
+          </Field>
+        )}
         <Field
           label={user ? "Atur ulang kata sandi" : "Kata sandi awal"}
           optional={!!user}
@@ -98,7 +114,7 @@ function UserSheet({ user, onClose, onSaved }: { user: User | null; onClose: () 
             )}
           </Field>
         )}
-        <button className="btn btn--primary btn--lg btn--block" disabled={busy || !fullName || (!user && (!username || password.length < 8))} onClick={save}>
+        <button className="btn btn--primary btn--lg btn--block" disabled={busy || !fullName || !nikOk || (!user && (!username || password.length < 8))} onClick={save}>
           {busy ? "Menyimpan..." : user ? "Simpan" : "Buat akun"}
         </button>
         {user && !self && (
