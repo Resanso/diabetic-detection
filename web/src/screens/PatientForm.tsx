@@ -1,6 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { get, post, put, type Patient } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { localId, savePatient, searchOffline } from "../lib/offline/store";
+import { isNetworkError, refreshCounts } from "../lib/offline/sync";
 import { ActionBar, Banner, Field, Segmented, TopBar, YesNo, useToast } from "../components/ui";
 import { useStartScreening } from "./NewScreening";
 import { PayerFields, payerBody, payerErrors, payerFrom, type PayerValue } from "../components/PayerFields";
@@ -52,6 +55,7 @@ export default function PatientForm() {
   const navigate = useNavigate();
   const toast = useToast();
   const { start } = useStartScreening();
+  const { user } = useAuth();
   const [f, setF] = useState<Form>(EMPTY);
   const [errors, setErrors] = useState<Partial<Record<keyof Form, string>>>({});
   const [serverError, setServerError] = useState<string | null>(null);
@@ -97,13 +101,36 @@ export default function PatientForm() {
     try {
       const saved = id ? await put<Patient>(`/api/patients/${id}`, body) : await post<Patient>("/api/patients", body);
       toast(id ? "Data pasien disimpan" : `Pasien terdaftar dengan nomor ${saved.mrn}`);
-      if (thenScreen) await start(saved.id);
+      if (thenScreen) await start(saved);
       else navigate(`/pasien/${saved.id}`, { replace: true });
     } catch (err) {
+      if (!id && isNetworkError(err)) return await saveOffline(body);
       setServerError((err as Error).message);
     } finally {
       setBusy(false);
     }
+  }
+
+  /** Tanpa sinyal: pasien disimpan di HP dan didaftarkan ke server saat ada sinyal (NIK yang sama tidak dobel). */
+  async function saveOffline(body: Omit<Patient, "id" | "mrn" | "created_at" | "created_by" | "bpjs_status" | "bpjs_class" | "bpjs_checked_at">) {
+    if (body.nik && (await searchOffline(body.nik, user!.id)).some((p) => p.nik === body.nik))
+      return setServerError("Pasien dengan NIK ini sudah ada di HP. Cari namanya di daftar pasien.");
+    const p = {
+      ...body,
+      id: localId(),
+      mrn: "Belum terkirim",
+      bpjs_status: null,
+      bpjs_class: null,
+      bpjs_checked_at: null,
+      created_by: user!.id,
+      created_at: Date.now() / 1000,
+      user_id: user!.id,
+    };
+    await savePatient(p);
+    refreshCounts();
+    toast("Tidak ada sinyal. Pasien disimpan di HP dan didaftarkan saat ada sinyal");
+    if (thenScreen) await start(p);
+    else navigate("/pasien", { replace: true });
   }
 
   return (

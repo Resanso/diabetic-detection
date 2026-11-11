@@ -10,8 +10,11 @@ import App from "./App";
 import { AuthProvider } from "./lib/auth";
 import { ToastProvider } from "./components/ui";
 import { initTheme } from "./lib/theme";
+import { registerSW } from "virtual:pwa-register";
 
 initTheme();
+// Service worker: aplikasi tetap terbuka tanpa sinyal. Versi baru aktif setelah aplikasi ditutup lalu dibuka lagi.
+registerSW({ immediate: true });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

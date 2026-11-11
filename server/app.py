@@ -8,6 +8,7 @@ Modul:
 """
 import io
 import json
+import mimetypes
 import os
 import re
 import time
@@ -31,9 +32,11 @@ from inference import (
     LABELS,
     META,
     MODEL_IMG_SIZE,
+    MODEL_PATH,
     PREPROCESS_MODE,
     REF_GRADE,
     REF_PROB,
+    infer,
     row_to_dict,
     run_inference,
     session,
@@ -53,6 +56,11 @@ app.include_router(devices.router)
 app.include_router(appointments.router)
 
 ADMIN = Depends(require_role("admin"))
+
+# Aplikasi web (PWA) memuat ONNX Runtime sebagai modul .mjs + .wasm; browser menolak modul dengan tipe MIME yang salah.
+mimetypes.add_type("text/javascript", ".mjs")
+mimetypes.add_type("application/wasm", ".wasm")
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 
 def calculate_evaluation_metrics(records: list[dict], ref_prob: float = REF_PROB) -> dict:
@@ -175,6 +183,36 @@ def model_info():
     }
 
 
+def model_version() -> str:
+    st = os.stat(MODEL_PATH)
+    return f"{st.st_size:x}-{int(st.st_mtime):x}-{REF_PROB:.4f}"
+
+
+@app.get("/api/offline/meta")
+def offline_meta(user: dict = Depends(current_user)):
+    """Yang dibutuhkan HP untuk menjalankan AI dan cek kualitas tanpa sinyal. version berubah saat model diganti."""
+    return {
+        "version": model_version(),
+        "model_url": f"/api/offline/model?v={model_version()}",
+        "model_bytes": os.path.getsize(MODEL_PATH),
+        "labels": LABELS,
+        "img_size": MODEL_IMG_SIZE,
+        "preprocess_mode": PREPROCESS_MODE,
+        "mean": META.get("mean", [0.485, 0.456, 0.406]),
+        "std": META.get("std", [0.229, 0.224, 0.225]),
+        "ref_grade": REF_GRADE,
+        "ref_prob": REF_PROB,
+        "quality_thresholds": QC,
+        "can_see_ai": clinic.can_see_ai(user),
+    }
+
+
+@app.get("/api/offline/model", dependencies=[Depends(current_user)])
+def offline_model():
+    return FileResponse(MODEL_PATH, media_type="application/octet-stream",
+                        headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+
 @app.get("/api/benchmark/samples", dependencies=[ADMIN])
 def get_benchmark_samples():
     """Mengembalikan daftar 50 sampel citra benchmark untuk uji cepat per grade."""
@@ -225,14 +263,7 @@ async def evaluate_benchmark(threshold: float = Query(None)):
                 continue
 
             t0 = time.perf_counter()
-            if PREPROCESS_MODE == "ben_graham":
-                prep = ben_graham(img, MODEL_IMG_SIZE)
-            else:
-                prep = standard_preprocess(img, MODEL_IMG_SIZE)
-
-            x = to_model_input(prep)
-            raw_logits = session.run(None, {INPUT_NAME: x})[0][0]
-            probs = softmax(raw_logits)
+            probs, _ = infer(img)
             lat = (time.perf_counter() - t0) * 1000
             latencies.append(lat)
 
@@ -367,14 +398,7 @@ async def evaluate_batch(file: UploadFile = File(...), threshold: float = Form(N
                         continue
 
                     t0 = time.perf_counter()
-                    if PREPROCESS_MODE == "ben_graham":
-                        prep = ben_graham(img, MODEL_IMG_SIZE)
-                    else:
-                        prep = standard_preprocess(img, MODEL_IMG_SIZE)
-
-                    x = to_model_input(prep)
-                    raw_logits = session.run(None, {INPUT_NAME: x})[0][0]
-                    probs = softmax(raw_logits)
+                    probs, _ = infer(img)
                     lat = (time.perf_counter() - t0) * 1000
                     latencies.append(lat)
 
@@ -514,7 +538,8 @@ def web_app(path: str):
         raise HTTPException(404)
     candidate = os.path.normpath(os.path.join(WEB_DIST, path))
     if path and candidate.startswith(WEB_DIST + os.sep) and os.path.isfile(candidate):
-        return FileResponse(candidate)
+        # File di root build (sw.js, manifest) tidak punya hash di namanya; selalu cek versi terbaru
+        return FileResponse(candidate, headers={"Cache-Control": "no-cache"})
     index = os.path.join(WEB_DIST, "index.html")
     if not os.path.isfile(index):
         raise HTTPException(503, "Aplikasi web belum di-build. Jalankan: cd web && npm install && npm run build")

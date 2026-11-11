@@ -14,6 +14,7 @@ from database import BASE, IMG_DIR, db
 from preprocess import (
     IMG_SIZE,
     ben_graham,
+    crop_black_border,
     decode_image,
     generate_saliency_heatmap,
     quality_check,
@@ -29,10 +30,16 @@ with open(META_PATH) as f:
 LABELS = META["labels"]
 MODEL_IMG_SIZE = META.get("img_size", IMG_SIZE)
 PREPROCESS_MODE = META.get("preprocess_mode", "standard")
+ENSEMBLE = PREPROCESS_MODE == "ensemble"   # dua masukan (x456, x384), praproses Ben Graham di dalam graf
 REF_GRADE = META.get("referable_threshold_grade", 2)
 REF_PROB = float(os.getenv("REF_PROB") or META.get("referable_prob_threshold", 0.40))
 
-session = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
+if ENSEMBLE:
+    _so = ort.SessionOptions()
+    _so.enable_cpu_mem_arena = False   # lepas memori aktivasi setelah tiap foto (VPS kecil dipakai bersama)
+    session = ort.InferenceSession(MODEL_PATH, _so, providers=["CPUExecutionProvider"])
+else:
+    session = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
 INPUT_NAME = session.get_inputs()[0].name
 
 
@@ -45,6 +52,28 @@ def preprocess_for_model(img: np.ndarray) -> np.ndarray:
     if PREPROCESS_MODE == "ben_graham":
         return ben_graham(img, MODEL_IMG_SIZE)
     return standard_preprocess(img, MODEL_IMG_SIZE)
+
+
+def crop_square(img: np.ndarray, tol: int = 7) -> np.ndarray:
+    """Buang tepi hitam lalu tambal jadi persegi (identik dengan pelatihan ensemble)."""
+    c = crop_black_border(img, tol)
+    h, w = c.shape[:2]
+    s = max(h, w)
+    out = np.zeros((s, s, 3), np.uint8)
+    out[(s - h) // 2:(s - h) // 2 + h, (s - w) // 2:(s - w) // 2 + w] = c
+    return out
+
+
+def infer(img: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Foto RGB -> (probabilitas 5 derajat, citra olahan yang dilihat model (RGB uint8))."""
+    if ENSEMBLE:
+        c = crop_square(img)
+        feed = {i.name: cv2.resize(c, (i.shape[1], i.shape[1]), interpolation=cv2.INTER_AREA).astype(np.float32)[None]
+                for i in session.get_inputs()}
+        probs, prep = session.run(["probs", "prep"], feed)
+        return probs[0], np.clip(prep[0], 0, 255).astype(np.uint8)
+    prep_img = preprocess_for_model(img)
+    return predict_probs(prep_img), prep_img
 
 
 def predict_probs(prep_img: np.ndarray) -> np.ndarray:
@@ -85,8 +114,7 @@ def run_inference(data: bytes, device: str, source: str, true_grade: int | None 
 
     t0 = time.perf_counter()
     quality = quality_check(img)
-    prep_img = preprocess_for_model(img)
-    probs = predict_probs(prep_img)
+    probs, prep_img = infer(img)
     latency = (time.perf_counter() - t0) * 1000
 
     grade = int(probs.argmax())
@@ -113,6 +141,7 @@ def run_inference(data: bytes, device: str, source: str, true_grade: int | None 
         "confidence": round(float(probs[grade]), 4),
         "referable": p_ref >= REF_PROB,
         "p_referable": round(p_ref, 4),
+        "ref_threshold": REF_PROB,
         "probs": [round(float(p), 4) for p in probs],
         "quality": quality,
         "latency_ms": round(latency, 1),
@@ -146,6 +175,7 @@ def row_to_dict(r) -> dict:
         "grade": r["grade"], "label": r["label"],
         "confidence": r["confidence"], "referable": bool(r["referable"]),
         "p_referable": r["p_referable"],
+        "ref_threshold": REF_PROB,
         "probs": json.loads(r["probs"]), "quality": json.loads(r["quality"]),
         "latency_ms": r["latency_ms"],
         "true_grade": r["true_grade"] if "true_grade" in keys else None,
